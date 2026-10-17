@@ -1,0 +1,32 @@
+{
+  "name": "agent-hallpass",
+  "version": "1.2.1",
+  "description": "Log agents into websites with credentials they can use but never read. Wraps agent-browser with a sealed vault, origin pinning, TOTP, output redaction and human handoff for CAPTCHA/MFA.",
+  "type": "module",
+  "bin": {
+    "hallpass": "bin/hallpass.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skill",
+    "README.md",
+    "SECURITY.md",
+    "ROADMAP.md",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "test": "node --test test/unit.test.mjs test/audit.test.mjs test/refs.test.mjs test/request.test.mjs test/ops.test.mjs test/trust.test.mjs",
+    "test:e2e": "node --test --test-concurrency=1 test/e2e.test.mjs",
+    "test:mcp": "node --test --test-concurrency=1 test/mcp.test.mjs",
+    "test:gate": "node --test --test-concurrency=1 test/gate.test.mjs",
+    "test:detect": "node --test --test-concurrency=1 test/detect.test.mjs",
+    "test:dialog": "node --test --test-concurrency=1 test/dialog.test.mjs",
+    "test:browser": "node --test --test-concurrency=1 test/e2e.test.mjs test/mcp.test.mjs test/gate.test.mjs test/detect.test.mjs",
+    "test:all": "npm test && npm run test:browser && npm run test:dialog"
+  },
+  "license": "MIT"
+}

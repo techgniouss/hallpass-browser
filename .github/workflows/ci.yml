@@ -1,0 +1,33 @@
+# NOTE: written but never executed by the author (no CI runner was available while building). First run may need tweaks.
+name: ci
+on: [push, pull_request]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      HALLPASS_NO_UI: '1'               # no desktop dialogs/notifications in CI; approvals fail closed
+      HALLPASS_SKIP_DIALOG_TEST: '1'    # the native-dialog test needs an interactive desktop
+      # Linux/macOS runners have no usable OS keyring: opt in to the file keystore (Windows uses DPAPI)
+      HALLPASS_KEYSTORE: ${{ runner.os == 'Windows' && '' || 'file' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Install agent-browser
+        shell: bash
+        run: |
+          npm i -g agent-browser
+          if [ "$RUNNER_OS" = "Linux" ]; then agent-browser install --with-deps; else agent-browser install; fi
+      - name: Unit tests (no browser)
+        run: npm test
+      - name: Browser tests (Linux needs a virtual display for the headed hand-off tests)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y xvfb && xvfb-run -a npm run test:browser
+      - name: Browser tests
+        if: runner.os != 'Linux'
+        run: npm run test:browser

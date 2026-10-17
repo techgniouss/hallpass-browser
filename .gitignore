@@ -1,0 +1,22 @@
+node_modules/
+*.tgz
+.DS_Store
+
+# hallpass runtime data (vault, profiles, audit log, pinned config) must never be committed
+.hallpass/
+master.key
+master.key.*
+*.dpapi
+audit.log
+
+# secrets and key material
+.env*
+!.env.example
+*.pem
+*.key
+*.jks
+*.p12
+*.pfx
+credentials*.json
+*-credentials.json
+*.export.json
