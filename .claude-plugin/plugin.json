@@ -1,0 +1,9 @@
+{
+  "name": "hallpass-browser",
+  "displayName": "Hallpass Browser",
+  "version": "1.3.0",
+  "description": "Open any website in a browser your AI agent can drive, and log in safely: credentials the agent can use but never read, with a hand-off to you for CAPTCHA/MFA.",
+  "author": { "name": "techgniouss" },
+  "license": "MIT",
+  "keywords": ["browser", "login", "credentials", "agent-browser", "mcp", "security"]
+}

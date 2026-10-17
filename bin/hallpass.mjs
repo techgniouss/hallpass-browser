@@ -13,7 +13,7 @@ import { normalizeAllowed, parseOrigin } from '../src/origin.mjs';
 import { parseTotpInput, base32Decode } from '../src/totp.mjs';
 import { isTTY, ask, askHidden, readAllStdin } from '../src/prompt.mjs';
 import { login, openSite, resume, status, logout, clearState } from '../src/login.mjs';
-import { findBinary } from '../src/ab.mjs';
+import { findBinary, TESTED_AGENT_BROWSER } from '../src/ab.mjs';
 import { home } from '../src/paths.mjs';
 import { install, mcpConfig, TARGETS, MCP_TARGETS } from '../src/install.mjs';
 import { parseExpiry, resetUses, revokeGrant } from '../src/policy.mjs';
@@ -294,7 +294,7 @@ switch (cmd) {
     const checks = [];
     const add = (name, okk, detail) => checks.push({ name, ok: okk, detail });
     add('node >= 20', Number(process.versions.node.split('.')[0]) >= 20, process.versions.node);
-    try { const bin = findBinary(); const r = spawnSync(bin, ['--version'], { encoding: 'utf8' }); add('agent-browser', r.status === 0, `${(r.stdout || '').trim()} (pinned: ${bin})`); } catch (e) { add('agent-browser', false, e.message); }
+    try { const bin = findBinary(); const r = spawnSync(bin, ['--version'], { encoding: 'utf8' }); const ver = /(\d+\.\d+)\.\d+/.exec(r.stdout || '')?.[1]; add('agent-browser', r.status === 0, `${(r.stdout || '').trim()} (pinned: ${bin})`); add('agent-browser compatibility', true, ver === TESTED_AGENT_BROWSER ? `${ver}.x is the tested release line` : `NOTE: hallpass was tested with ${TESTED_AGENT_BROWSER}.x; you have ${ver || 'unknown'}. It may work, but report anything odd`); } catch (e) { add('agent-browser', false, e.message); }
     try { const b = backend(); const k = masterKey({ create: false }); add('keystore', true, `${b.name}; master key ${k ? 'present' : 'not created yet (created on first "hallpass add")'}`); } catch (e) { add('keystore', false, e.message); }
     add('home dir', true, home());
     try { const c = verifyLog(); add('audit log', c.ok, c.ok ? `${c.entries} entries, chain intact` : `TAMPERED or damaged at entry ${c.broken_at}: ${c.reason}`); } catch (e) { add('audit log', false, e.message); }
@@ -324,16 +324,16 @@ switch (cmd) {
     break;
   }
   case 'mcp-config': {
-    const { values: v } = opts({ for: { type: 'string' } }, false);
-    if (!v.for) usage('usage: hallpass mcp-config --for <' + MCP_TARGETS.join('|') + '>');
-    out(safe(() => mcpConfig(v.for)));
+    const { values: v } = opts({ for: { type: 'string' }, npx: { type: 'boolean' } }, false);
+    if (!v.for) usage('usage: hallpass mcp-config --for <' + MCP_TARGETS.join('|') + '> [--npx]');
+    out(safe(() => mcpConfig(v.for, { npx: !!v.npx })));
     break;
   }
   case 'install-skill': {
     const { values: v } = opts({ dir: { type: 'string' } }, false);
     const dest = path.join(v.dir || path.join(os.homedir(), '.claude', 'skills'), 'hallpass');
     fs.mkdirSync(dest, { recursive: true });
-    fs.copyFileSync(path.join(HERE, '..', 'skill', 'hallpass', 'SKILL.md'), path.join(dest, 'SKILL.md'));
+    fs.copyFileSync(path.join(HERE, '..', 'skills', 'hallpass', 'SKILL.md'), path.join(dest, 'SKILL.md'));
     out({ status: 'installed', path: path.join(dest, 'SKILL.md') });
     break;
   }

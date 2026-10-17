@@ -84,3 +84,18 @@ Be honest with yourself about these.
 ## Reporting
 
 Open an issue with a reproduction. Do not include real credentials.
+
+## Reporting a vulnerability
+
+Please **do not open a public issue** for a security problem.
+
+- Use GitHub's private vulnerability reporting: the repository's **Security → Report a vulnerability** button (maintainers: enable *Private vulnerability reporting* in the repository settings).
+- Include: affected version (`hallpass --version`), OS, what an attacker or a careless agent can do, and a minimal reproduction. **Never include real credentials.**
+- What counts: any path by which an agent (or a web page) can *read* a stored secret, make Hallpass type one into the wrong origin, bypass an approval dialog or the terminal-only rules, or read/forge the audit log undetectably. Weaknesses already listed under "What hallpass does NOT protect against" are known limits, not vulnerabilities, but improvements are welcome.
+- Expect an acknowledgement within a few days and a coordinated fix and disclosure. This is a volunteer project; there is no bug bounty.
+
+Supported versions: the latest release only (the project is pre-1.x-stable and moves quickly).
+
+## Using this software safely
+
+Hallpass is a beta, single-author tool that has **not been independently audited**. Do not use it for accounts whose compromise would be severe (banking, domain registrars, root cloud accounts) until it has been reviewed by people other than its author.

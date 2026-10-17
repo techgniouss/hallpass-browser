@@ -59,7 +59,10 @@ async function add(name, scenario, { password = PASSWORD, withTotp = false, extr
 
 before(async () => { site = await startSite({ user: USER, password: PASSWORD, totpCfg: TOTP, humanPassword: HUMAN_PW, alsoAccept: [REF_PW] }); });
 after(async () => {
-  for (const n of ['simple', 'twostep', 'totp', 'captcha', 'badpw', 'phish', 'site-127.0.0.1']) await hp(['logout', n, '--wipe']);
+  // close every browser session this run created: the names are exactly the profile folders in OUR temp home,
+  // so this can never touch a real user's sessions
+  const created = fs.existsSync(path.join(HOME, 'profiles')) ? fs.readdirSync(path.join(HOME, 'profiles')) : [];
+  for (const n of new Set([...created, 'simple', 'twostep', 'totp', 'captcha', 'badpw', 'phish', 'site-127.0.0.1'])) await hp(['logout', n, '--wipe']);
   site.close();
 });
 

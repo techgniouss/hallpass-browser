@@ -17,6 +17,9 @@ const readCfg = () => { try { return JSON.parse(fs.readFileSync(cfgFile(), 'utf8
 const pinned = () => { const p = readCfg().agentBrowser; return typeof p === 'string' && fs.existsSync(p) ? p : null; };
 const pin = (p) => { try { fs.writeFileSync(cfgFile(), JSON.stringify({ ...readCfg(), agentBrowser: p }), { mode: 0o600 }); } catch { /* best effort */ } };
 
+// The agent-browser release line this version of hallpass was developed and tested against. Newer lines may change CLI output.
+export const TESTED_AGENT_BROWSER = '0.27';
+
 let binCache;
 export function findBinary({ repin = false } = {}) {
   if (!repin) {

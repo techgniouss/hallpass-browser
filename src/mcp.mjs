@@ -16,7 +16,7 @@ import { guardBrowser, runBrowser } from './act.mjs';
 export { guardBrowser };
 import { profilesDir } from './paths.mjs';
 
-const VERSION = '1.2.1';
+const VERSION = '1.3.0';
 
 export const INSTRUCTIONS = `hallpass opens websites in a browser you can drive, and handles login safely.
 

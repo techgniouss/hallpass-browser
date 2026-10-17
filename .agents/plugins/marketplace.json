@@ -1,0 +1,12 @@
+{
+  "name": "hallpass-browser",
+  "interface": { "displayName": "Hallpass Browser" },
+  "plugins": [
+    {
+      "name": "hallpass-browser",
+      "source": { "source": "local", "path": "./" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Developer Tools"
+    }
+  ]
+}

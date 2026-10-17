@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.0 (packaging for open source)
+
+Added
+- Renamed the npm package to **hallpass-browser** (command stays `hallpass`).
+- Native packages: **Claude Code plugin + marketplace** (`.claude-plugin/`, `.mcp.json`, `skills/`), **Codex plugin** (`.codex-plugin/`, `.agents/plugins/marketplace.json`), **Gemini CLI extension** (`gemini-extension.json`, `GEMINI.md`). Claude's manifests pass `claude plugin validate`; the Codex and Gemini packages follow the official docs but could not be run (no CLIs available).
+- `hallpass install --for antigravity` now installs a real skill into `~/.gemini/config/skills/` (and the CLI's skills dir if present); `antigravity-project` installs into `.agents/skills`. Locations confirmed against a working Antigravity IDE install.
+- `hallpass mcp-config --for <tool> --npx` prints the `npx -y hallpass-browser mcp` form; the Antigravity entry now points at `~/.gemini/config/mcp_config.json`.
+- `bin/hallpass` launcher so the command is on PATH when installed as a Claude Code plugin.
+- MIT `LICENSE`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, vulnerability-reporting policy, issue/PR templates, Dependabot, and a release workflow with npm provenance (unrun).
+- `hallpass doctor` notes when agent-browser is outside the tested release line.
+- Packaging tests: manifest consistency, `claude plugin validate`, `npm pack` contents.
+
+Changed
+- `skill/` moved to `skills/` (the layout all three plugin systems expect).
+
 ## 1.2.1 (second audit)
 
 Fixed

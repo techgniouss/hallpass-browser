@@ -1,0 +1,3 @@
+#!/bin/sh
+# Puts `hallpass` on the Bash tool PATH when installed as a Claude Code plugin (bin/ is added to PATH).
+exec node "$(dirname "$0")/hallpass.mjs" "$@"

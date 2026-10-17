@@ -1,0 +1,14 @@
+name: Feature request
+description: Suggest an improvement (see ROADMAP.md first)
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes: { label: "What are you trying to do, and what gets in the way?" }
+    validations: { required: true }
+  - type: textarea
+    id: idea
+    attributes: { label: "What would you like Hallpass to do?" }
+  - type: textarea
+    id: safety
+    attributes: { label: "How does it keep the guarantee that an agent can use a login but never read it?", description: "If the feature touches credentials, approvals or the browser tool, this matters most." }

@@ -1,0 +1,26 @@
+# NOTE: written but never executed by the author. Publishing needs an NPM_TOKEN secret and a maintainer's decision.
+# Pushing a tag like v1.3.0 runs the unit tests and publishes to npm WITH provenance (signed build attestation).
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+  id-token: write        # npm provenance
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm-publish   # configure required reviewers on this environment so a human approves every release
+    env:
+      HALLPASS_KEYSTORE: file
+      HALLPASS_NO_UI: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, registry-url: 'https://registry.npmjs.org' }
+      - name: Tag matches package version
+        run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
+      - run: npm test
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

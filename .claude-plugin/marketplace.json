@@ -1,0 +1,12 @@
+{
+  "name": "hallpass-browser",
+  "description": "Hallpass Browser: safe logins for AI browser agents",
+  "owner": { "name": "techgniouss" },
+  "plugins": [
+    {
+      "name": "hallpass-browser",
+      "source": "./",
+      "description": "Open any website in a browser your AI agent can drive, and log in safely. Credentials the agent can use but never read; hand-off to you for CAPTCHA/MFA."
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "hallpass": {
+      "type": "stdio",
+      "command": "hallpass",
+      "args": ["mcp"]
+    }
+  }
+}
