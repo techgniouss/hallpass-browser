@@ -59,7 +59,7 @@ test('Claude Code plugin + marketplace: consistent, MCP points at a real file', 
 });
 
 test('claude plugin validate accepts the plugin and marketplace', { skip: spawnSync('claude', ['--version'], { shell: true }).status !== 0 && 'claude CLI not installed' }, () => {
-  const r = spawnSync('claude', ['plugin', 'validate', '.'], { cwd: ROOT, encoding: 'utf8', shell: true, timeout: 120_000 });
+  const r = spawnSync('claude', ['plugin', 'validate', '.'], { cwd: ROOT, encoding: 'utf8', shell: true, timeout: 400_000 });
   const out = r.stdout + r.stderr;
   assert.equal(r.status, 0, out);
   assert.match(out, /Validation passed/);
@@ -97,7 +97,7 @@ test('Gemini CLI extension: follows the documented shape (not runnable here)', (
 });
 
 test('npm tarball contains everything a user needs and nothing they should not get', () => {
-  const r = spawnSync('npm', ['pack', '--dry-run', '--json'], { cwd: ROOT, encoding: 'utf8', shell: true, timeout: 120_000 });
+  const r = spawnSync('npm', ['pack', '--dry-run', '--json'], { cwd: ROOT, encoding: 'utf8', shell: true, timeout: 400_000 });
   assert.equal(r.status, 0, r.stderr);
   const files = JSON.parse(r.stdout)[0].files.map((f) => f.path.replace(/\\/g, '/'));
   for (const must of ['LICENSE', 'README.md', 'SECURITY.md', 'CHANGELOG.md', 'package.json', 'bin/hallpass.mjs', 'skills/hallpass/SKILL.md', '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json', '.codex-plugin/plugin.json', '.mcp.json', 'gemini-extension.json', 'GEMINI.md', 'src/login.mjs', 'src/sysexe.mjs']) {

@@ -57,5 +57,13 @@
     "test:browser": "node --test --test-concurrency=1 test/e2e.test.mjs test/mcp.test.mjs test/gate.test.mjs test/detect.test.mjs",
     "test:all": "npm test && npm run test:browser && npm run test:dialog",
     "prepublishOnly": "npm test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/techgniouss/hallpass-browser.git"
+  },
+  "homepage": "https://github.com/techgniouss/hallpass-browser#readme",
+  "bugs": {
+    "url": "https://github.com/techgniouss/hallpass-browser/issues"
   }
 }

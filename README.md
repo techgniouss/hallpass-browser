@@ -36,9 +36,9 @@ Each tool gets a *native* package where one exists. **"Checked"** says how far I
 
 | Tool | Install | What you get | Checked |
 |---|---|---|---|
-| **Claude Code** | `/plugin marketplace add <owner>/hallpass-browser` then `/plugin install hallpass-browser@hallpass-browser` | skill + MCP server, bundled | manifests pass `claude plugin validate`; MCP server and skill tested |
-| **OpenAI Codex** | `npm i -g hallpass-browser`, then `codex plugin marketplace add <owner>/hallpass-browser` | skill + MCP server (`.codex-plugin/`, `.agents/plugins/marketplace.json`) | **written from the official docs; no Codex CLI was available to run it** |
-| **Gemini CLI** | `gemini extensions install https://github.com/<owner>/hallpass-browser` | skill + MCP server + context (`gemini-extension.json`) | **written from the official docs; not run.** Google says Antigravity CLI is replacing Gemini CLI for some users |
+| **Claude Code** | `/plugin marketplace add techgniouss/hallpass-browser` then `/plugin install hallpass-browser@hallpass-browser` | skill + MCP server, bundled | manifests pass `claude plugin validate`; MCP server and skill tested |
+| **OpenAI Codex** | `npm i -g hallpass-browser`, then `codex plugin marketplace add techgniouss/hallpass-browser` | skill + MCP server (`.codex-plugin/`, `.agents/plugins/marketplace.json`) | **written from the official docs; no Codex CLI was available to run it** |
+| **Gemini CLI** | `gemini extensions install https://github.com/techgniouss/hallpass-browser` | skill + MCP server + context (`gemini-extension.json`) | **written from the official docs; not run.** Google says Antigravity CLI is replacing Gemini CLI for some users |
 | **Google Antigravity** (IDE and CLI) | `hallpass install --for antigravity` and `hallpass mcp-config --for antigravity` | a real skill in `~/.gemini/config/skills/` and an MCP entry for `~/.gemini/config/mcp_config.json` | file locations and formats confirmed against a working Antigravity IDE install; the agent itself not run |
 | **Cursor / Windsurf / VS Code + Copilot** | `hallpass install --for cursor` (etc.) and `hallpass mcp-config --for <tool>` | rule file + MCP entry | rule/config formats from docs; tools not run |
 | **Anything else with a shell** | nothing extra: it is a CLI that prints JSON | | tested |
