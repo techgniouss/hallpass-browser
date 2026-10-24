@@ -7,14 +7,14 @@ Thanks for helping. This is a security-sensitive tool, so a few rules are strict
 1. **Never put a real secret anywhere**: not in code, tests, fixtures, issues, screenshots or logs. Tests use fake credentials against local mock sites.
 2. **The central guarantee must not weaken.** An agent can *use* a credential but must have no path to *read* it. Any change that adds a command, flag, env var, tool parameter or output field is reviewed against that. If it touches `src/login.mjs`, `src/vault.mjs`, `src/policy.mjs`, `src/act.mjs`, `src/mcp.mjs`, `src/ab.mjs`, `src/ui.mjs`, `src/sysexe.mjs` or `src/request.mjs`, say how the guarantee is preserved in the PR.
 3. **Human-only means human-only.** Anything that changes trust (replace/remove a login, unlock, export, import, register a password-manager reference, re-pin the browser binary) must require a real terminal or a native dialog the agent cannot click, and fail closed.
-4. **No new runtime dependencies** without a strong reason. Zero dependencies is a supply-chain feature.
+4. **No new runtime dependencies** without a strong reason. The one exception is `agent-browser` (the program that drives Chrome), which hallpass cannot work without; it is pinned to a tested minor line (`~0.39.2`) and resolved from our own copy before PATH (see SECURITY.md, "Auto-installed browser"). Everything else stays dependency-free: that is a supply-chain feature.
 5. **Tell the truth in docs.** If you could not run something (a platform, a client), say so. See how the README's "Checked" column is written.
 
 ## Setup
 
 ```bash
 git clone <your fork> && cd hallpass-browser
-npm i -g agent-browser && agent-browser install     # one-time
+npm install                                         # brings agent-browser (a dependency) and fetches Chrome
 npm test                                            # fast, no browser
 npm run test:browser                                # real Chrome against local mock sites
 ```

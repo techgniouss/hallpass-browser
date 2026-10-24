@@ -36,7 +36,7 @@ export function vetUploadFile(p, { cwd = process.cwd() } = {}) {
   if (typeof p !== 'string' || !p || p.length > 1000 || /[\u0000-\u001f]/.test(p)) return { ok: false, error: 'invalid file path' };
   if (p.startsWith('-')) return { ok: false, error: `"${p.slice(0, 40)}" looks like a flag, not a file path` };
   const real = realOrNull(path.resolve(cwd, p));
-  if (!real) return { ok: false, error: `file not found: ${p.slice(0, 120)}` };
+  if (!real) return { ok: false, error: `file not found: ${p.slice(0, 120)}${path.isAbsolute(p) ? '' : ' (use an absolute path: relative paths are resolved against the hallpass server\'s folder, not yours)'}` };
   let st;
   try { st = fs.statSync(real); } catch { return { ok: false, error: `cannot read ${p.slice(0, 120)}` }; }
   if (!st.isFile()) return { ok: false, error: `not a regular file: ${p.slice(0, 120)}` };
