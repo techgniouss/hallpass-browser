@@ -1,7 +1,7 @@
 ---
 name: hallpass
 description: Open any website or web app (Google Play Console, Supabase, Vercel, GitHub, AWS, anything) in a browser Claude can drive, handling login safely. Either the user logs in themselves in a visible window and Claude carries on afterwards, or Claude logs in headlessly from a sealed vault using credentials it can use but never read (incl. TOTP). Use whenever a task needs a logged-in browser, "open X and do Y", "go to my console/dashboard", or when you would otherwise ask the user for a password.
-allowed-tools: Bash(hallpass:*), Bash(agent-browser:*)
+allowed-tools: Bash(hallpass:*)
 ---
 
 # hallpass: open anything, log in safely
@@ -28,7 +28,7 @@ It prints one JSON object. Branch on `status`:
 
 | status | meaning | you do |
 |---|---|---|
-| `logged_in` | session `hp-...` is ready on that page. `via` says how: `session` (already logged in / no login needed), `vault` (hallpass typed stored credentials), `human` (the user logged in) | work with `agent-browser --session <session> ...` (`use` shows the command) |
+| `logged_in` | session `hp-...` is ready on that page. `via` says how: `session` (already logged in / no login needed), `vault` (hallpass typed stored credentials), `human` (the user logged in) | work with `hallpass do <session> <command...>` (`use` shows the command) |
 | `needs_human` | a login wall, CAPTCHA, or MFA that needs the user. **A Chrome window is open on it.** | tell the user what to do, wait for their reply, then `hallpass resume <name>` |
 | `failed` | see `reason` | see table below; never loop |
 
@@ -58,7 +58,7 @@ It watches the page until the login wall is gone, then returns `logged_in` with 
 
 `needs_human` reasons: `login` (sign-in wall), `captcha`, `mfa` / `mfa_code` (second factor), `redirected` (the site sent logged-out visitors to a different site's public page, e.g. Play Console to a marketing page, so we are probably not logged in), `unknown_page`.
 
-**Detection is heuristic, so it can be wrong.** If `needs_human` came back but a screenshot (`agent-browser --session <session> screenshot`) shows the user is plainly logged in on the right page, tell the user and carry on with that session instead of making them confirm. If `logged_in` came back but the page is clearly a login or landing page, treat it as not logged in and re-run with `--headed`.
+**Detection is heuristic, so it can be wrong.** If `needs_human` came back but a screenshot (`hallpass do <session> screenshot`, or the MCP `browser_screenshot` tool) shows the user is plainly logged in on the right page, tell the user and carry on with that session instead of making them confirm. If `logged_in` came back but the page is clearly a login or landing page, treat it as not logged in and re-run with `--headed`.
 
 ### Mode B: headless with stored credentials
 
@@ -78,19 +78,49 @@ Offer Mode B when the user has to log in to the same site repeatedly; do not req
 
 ### Working after login
 
-Always pass the session hallpass created, or you will drive a different, logged-out browser:
+Always pass the session hallpass created, and drive it with `hallpass do` (same commands as `agent-browser`, but it also attaches the session's saved profile). **Do not call `agent-browser --session <session> ...` directly:** without the profile it lands on a blank tab, not on the logged-in page.
 
 ```bash
-agent-browser --session <session> snapshot -i
-agent-browser --session <session> click @e3
-agent-browser --session <session> open https://.../another/page
+hallpass do <session> snapshot -i
+hallpass do <session> click @e3
+hallpass do <session> open https://.../another/page
 ```
 
 Refs go stale after page changes; re-snapshot. If you later land on a login wall again, run `hallpass open <url>` again.
 
 ### Irreversible actions are confirmed by the user, not by you
 
-Through the MCP `browser` tool, and through `hallpass do <session> <command...>` in a shell, clicks that look irreversible or outward-facing (delete, publish, pay, submit, apply, release, invite, ...) pop a dialog **the user** must approve. If you get "Blocked: the user did not approve", do **not** retry, rephrase, or find another route to the same effect. Tell the user exactly what you wanted to do and let them decide. Prefer `hallpass do` over calling `agent-browser` directly for clicks on pages that can change things. If the server is read-only you can observe but not change anything.
+Through the MCP `browser` tool, and through `hallpass do <session> <command...>` in a shell, clicks that look irreversible or outward-facing (delete, publish, pay, submit, apply, start rollout, send for review, invite, ...) pop a dialog **the user** must approve. If you get "Blocked: the user did not approve", do **not** retry, rephrase, or find another route to the same effect. Tell the user exactly what you wanted to do and let them decide. Prefer `hallpass do` over calling `agent-browser` directly for clicks on pages that can change things. If the server is read-only you can observe but not change anything.
+
+### Uploading files and saving screenshots
+
+Publishing anything real means getting files into a page (an `.aab`, store screenshots, a CSV). Use the `upload` command on the **file input**, with absolute paths:
+
+```bash
+hallpass do <session> upload "input[type=file]" /abs/path/app-release.aab        # MCP browser tool: ["upload","input[type=file]","/abs/path/app-release.aab"]
+hallpass do <session> upload "input[type=file]" /abs/shot1.png /abs/shot2.png    # several files in one call
+```
+
+- **Do not click the visible "Upload" / "Browse" button** expecting a file picker: that opens an OS dialog nobody can drive. The real `<input type=file>` is usually hidden, so `snapshot -i` does not list it, but a CSS selector still reaches it. If there are several, scope it (`"#screenshots input[type=file]"`) or check with `get count "input[type=file]"`.
+- After the call, `snapshot` and confirm the file name / thumbnail / progress appeared, and `wait --text "<something that appears when processing finishes>"` before moving on. Large bundles can take a minute to process.
+- The **user approves each upload** in a native dialog ("Allow once" or "Allow for 1 hour" for that site). If it is blocked, do not retry or rename the file; tell the user.
+- Only app bundles, images, video, documents, archives and plain text are accepted, never from hidden/config folders (`.ssh`, `.aws`, `.config`, `.git`, ...). Keystores, `.json` key files and `.pem` are refused on purpose: the user uploads those by hand.
+- `screenshot [--full] [name.png]` saves a screenshot of the **web page** into a private hallpass folder and prints the path (you cannot choose another folder). It does not capture an Android device or emulator: the user (or another tool) supplies app screenshots as image files.
+
+### Playbook: publish an app to Google Play (internal or closed testing)
+
+Typical request: "put my app on Play internal testing". Do all the clicking, typing and uploading; the user does the sign-in, the legal attestations and the final go.
+
+1. `hallpass open https://play.google.com/console` (Mode A the first time; the profile keeps the session). Pick the developer account and the app (`snapshot -i`; ask the user if several apps could match).
+2. **Before touching the console, check the files the user gave you**: the `.aab` (not `.apk`), and screenshots/icon sized for Play. Typical limits: icon 512x512 PNG; feature graphic 1024x500; phone screenshots 2-8 images, 16:9 or 9:16, each side 320-3840 px. Wrong sizes are rejected after upload, so check dimensions first, and ask for replacements rather than resizing silently. Requirements change; trust what the console says on the page.
+3. **Store listing** (Grow, then Store presence, then Main store listing): `fill` name, short description, full description with text the user gave you (use their words; do not invent claims). Upload icon, feature graphic and screenshots with `upload` into each graphics section's file input. Save as draft.
+4. **Release**: Test and release, then Testing, then Internal testing (or Closed testing, then the track), then **Create new release**. `upload` the `.aab`, wait for it to finish processing, fill release name and release notes, **Next**, review warnings/errors on the summary page (report errors to the user instead of guessing), then **Save**.
+5. **Testers**: Testers tab, pick or create an email list with the addresses the user gave you. Copy the opt-in link and give it to the user.
+6. **Stop before "Start rollout to Internal testing" / "Send for review" / "Publish".** Tell the user exactly what will be released and to which track, wait for their "yes"; the click then also pops the native confirmation. Never click these as part of "just getting things ready".
+7. **Compliance forms are the user's legal statements**: app-creation checkboxes (developer policy, US export law), privacy policy URL, Data safety, content rating, target audience, ads declaration. Fill only answers the user has told you; if you do not have an answer, ask. Show what you intend to submit before saving these forms. Never tick an attestation on your own initiative.
+8. Brand-new personal developer accounts have extra requirements before Production (a closed test with a minimum number of testers for a period). The console's dashboard ("Set up your app" / "Publish your app" tasks) lists what is still outstanding: read it and report rather than assume.
+
+If the session expires mid-task you land on a login wall again: `hallpass open <url>`, ask the user to sign in, `hallpass resume`, then continue from the page you were on. Console layouts change; read the page (`snapshot -i`) instead of assuming a button exists, and say so when the page differs from this outline.
 
 ### `failed` reasons
 
@@ -116,4 +146,4 @@ Through the MCP `browser` tool, and through `hallpass do <session> <command...>`
 - Google may show device approval or bot checks on a fresh profile; expect one `needs_human` the first time, then the saved profile carries the session.
 - Passkey, security-key and push-approval MFA always need the user at the window.
 - Login forms inside iframes are not auto-filled (Mode B); Mode A works on any login.
-- Output never contains page text or query strings, only origin + path and a scrubbed title. Read pages yourself with `agent-browser --session <session> snapshot`, and remember rule 3.
+- Output never contains page text or query strings, only origin + path and a scrubbed title. Read pages yourself with `hallpass do <session> snapshot`, and remember rule 3.

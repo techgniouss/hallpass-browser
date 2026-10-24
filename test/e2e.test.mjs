@@ -48,7 +48,8 @@ async function hp(args, input, extraEnv = {}) {
   return { code: r.code, json, out: r.out, err: r.err };
 }
 async function ab(session, args) {
-  const r = await run('agent-browser', ['--session', session, '--json', ...args], { shell: process.platform === 'win32' });
+  // like hallpass itself, and like `hallpass do`: without --profile agent-browser attaches to a blank tab, not the page the person sees
+  const r = await run('agent-browser', ['--session', session, '--profile', path.join(HOME, 'profiles', session.slice(3)), '--json', ...args], { shell: process.platform === 'win32' });
   return { ok: r.code === 0, out: r.out };
 }
 async function add(name, scenario, { password = PASSWORD, withTotp = false, extra = [] } = {}) {
@@ -238,6 +239,8 @@ test('closing the window mid-login: resume says so instead of spawning a blank b
   const r = await hp(['open', `http://127.0.0.1:${site.port}/twostep/app`]);
   assert.equal(r.json?.status, 'needs_human', r.out + r.err);
   await ab(r.json.session, ['close']);
+  // `close` returns before the daemon has exited (it still shows in `session list` for a second or two)
+  for (let i = 0; i < 30 && (await run('agent-browser', ['session', 'list'], { shell: process.platform === 'win32' })).out.includes(r.json.session); i++) await new Promise((res) => setTimeout(res, 300));
   const st = await hp(['status', r.json.name]);
   assert.equal(st.json.browser_running, false);
   const list = await run('agent-browser', ['session', 'list'], { shell: process.platform === 'win32' });
@@ -389,7 +392,7 @@ test('no secret appears in anything hallpass printed, on disk, or in agent-brows
   if (fs.existsSync(abDir)) {
     for (const f of walk(abDir)) {
       const st = fs.statSync(f);
-      if (st.mtimeMs < STARTED || st.size > 8e6) continue;
+      if (!st.isFile() || st.mtimeMs < STARTED || st.size > 8e6) continue; // unix sockets (<session>.sock) cannot be read
       const t = fs.readFileSync(f, 'latin1');
       for (const n of needles) assert.ok(!t.includes(n), `leak in agent-browser file ${f}`);
     }

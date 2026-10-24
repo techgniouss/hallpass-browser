@@ -16,7 +16,7 @@ import { guardBrowser, runBrowser } from './act.mjs';
 export { guardBrowser };
 import { profilesDir } from './paths.mjs';
 
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 
 export const INSTRUCTIONS = `hallpass opens websites in a browser you can drive, and handles login safely.
 
@@ -37,6 +37,7 @@ WORKFLOW
 - If several stored credentials match the site you get reason "ambiguous_credential": ask the user which account, then call hallpass_open again with "as".
 - Detection is heuristic. If needs_human came back but a screenshot shows the user is plainly logged in on the right page, say so and carry on; if logged_in came back on a login or marketing page, call hallpass_open again with mode "headed".
 - Refs from a snapshot (@e1...) go stale after page changes: snapshot again.
+- To put a file into a page (an .aab, store screenshots, a CSV) use the browser tool's "upload" command on the file input (CSS selector such as input[type=file], hidden inputs are still targetable). Never click an "Upload" button expecting a file picker. The user approves each upload.
 - Risky clicks (delete, publish, pay, submit, ...) are confirmed by the USER in a native dialog. If one is blocked, do not retry or work around it: tell the user what you wanted to do.`;
 
 const TOOLS = [
@@ -80,7 +81,7 @@ const TOOLS = [
   },
   {
     name: 'browser',
-    description: 'Run one browser command in a hallpass session (the "session" returned by hallpass_open). command is an argv array, e.g. ["snapshot","-i"], ["click","@e3"], ["fill","@e2","text"], ["open","https://..."], ["get","text","@e1"], ["wait","--text","Saved"], ["press","Enter"], ["scroll","down","500"], ["tab","list"]. Allowed: open click dblclick fill type press keyboard hover focus check uncheck select scroll scrollintoview wait snapshot get is find tab back forward reload dialog drag highlight. Not available here: eval, cookies/storage/state, upload/download, network, file:// URLs. Clicks that look irreversible (delete, publish, pay, submit, ...) pop a dialog the USER must approve; if blocked, do not retry: tell the user.',
+    description: 'Run one browser command in a hallpass session (the "session" returned by hallpass_open). command is an argv array, e.g. ["snapshot","-i"], ["click","@e3"], ["fill","@e2","text"], ["open","https://..."], ["get","text","@e1"], ["wait","--text","Saved"], ["press","Enter"], ["scroll","down","500"], ["tab","list"]. Allowed: open click dblclick fill type press keyboard hover focus check uncheck select scroll scrollintoview wait snapshot get is find tab back forward reload dialog drag highlight upload screenshot. FILE UPLOAD: ["upload","input[type=file]","/abs/path/app.aab","/abs/path/shot1.png"] sets files on a file input directly, even a hidden one that snapshot does not list (do not click the visible Upload button: that opens an OS file picker you cannot drive). Only app bundles, images, video, documents, archives and plain text outside hidden/config folders are accepted, and the USER approves each upload in a dialog. SCREENSHOT TO FILE: ["screenshot","--full","name.png"] saves into a private hallpass folder and tells you the path. Not available here: eval, cookies/storage/state, download, network, file:// URLs. Clicks that look irreversible (delete, publish, pay, submit, start rollout, send for review, ...) pop a dialog the USER must approve; if blocked, do not retry: tell the user.',
     inputSchema: {
       type: 'object', required: ['session', 'command'], additionalProperties: false,
       properties: { session: { type: 'string', description: 'session name from hallpass_open, starts with hp-' }, command: { type: 'array', items: { type: 'string' }, description: 'agent-browser command and arguments' } },

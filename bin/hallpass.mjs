@@ -299,7 +299,7 @@ switch (cmd) {
     add('home dir', true, home());
     try { const c = verifyLog(); add('audit log', c.ok, c.ok ? `${c.entries} entries, chain intact` : `TAMPERED or damaged at entry ${c.broken_at}: ${c.reason}`); } catch (e) { add('audit log', false, e.message); }
     // env vars that weaken a safety control for whoever sets them (an agent can set them on its own command line)
-    const weak = [['HALLPASS_GATE', 'off', 'irreversible-action gate disabled'], ['HALLPASS_NO_UI', '1', 'no dialogs: approvals deny, notifications off'], ['HALLPASS_KEYSTORE', 'file', 'master key kept in a file, not the OS keystore']].filter(([k, v]) => process.env[k] === v);
+    const weak = [['HALLPASS_GATE', 'off', 'irreversible-action gate disabled'], ['HALLPASS_UPLOAD', 'allow', 'file uploads no longer need your approval (files are still vetted)'], ['HALLPASS_NO_UI', '1', 'no dialogs: approvals deny, notifications off'], ['HALLPASS_KEYSTORE', 'file', 'master key kept in a file, not the OS keystore']].filter(([k, v]) => process.env[k] === v);
     add('environment', true, weak.length ? 'NOTE: ' + weak.map(([k, v, why]) => `${k}=${v} (${why})`).join('; ') : 'no safety-relevant overrides set');
     out({ status: checks.every((c) => c.ok) ? 'ok' : 'problems', checks }, checks.every((c) => c.ok) ? 0 : 1);
     break;

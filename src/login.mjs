@@ -96,7 +96,7 @@ const base = (ctx) => ({ name: ctx.name, session: ctx.session, mode: ctx.browser
 // via: vault = hallpass typed the credentials; human = the user logged in; session = an existing saved session / no login needed
 const ok = (ctx, p) => ({
   status: 'logged_in', ...base(ctx), via: ctx.humanMode ? (ctx.walled ? 'human' : 'session') : (ctx.st.filledAny ? 'vault' : 'session'),
-  url: safeUrl(p.url), title: clean(ctx.redactor.scrub(p.title || '')), use: `agent-browser --session ${ctx.session} snapshot -i`,
+  url: safeUrl(p.url), title: clean(ctx.redactor.scrub(p.title || '')), use: `hallpass do ${ctx.session} snapshot -i`,
 });
 const LOCKING = new Set(['bad_credentials', 'bad_totp']);
 const readState = (name) => { try { return JSON.parse(fs.readFileSync(path.join(stateDir(), name + '.json'), 'utf8')); } catch { return null; } };

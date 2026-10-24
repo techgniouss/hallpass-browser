@@ -26,7 +26,7 @@ Verified by `npm run test:e2e`, which logs in against a local site with a honeyp
 |---|---|
 | No credential tool | The MCP server exposes no tool that adds, reads or exports secrets; credentials enter only via `hallpass add` in a human terminal. |
 | Confined to hallpass's browsers | `browser` / `browser_screenshot` accept only `hp-*` sessions, so a model cannot steer your other agent-browser sessions. |
-| Narrow command set | An allowlist of page commands; long flags allowlisted (blocks `--cdp`, `--proxy`, `--headers`, `--init-script`, `--profile`, ...); no `eval`, `cookies`, `storage`, `state`, `upload`, `download`, `network`. `file:`/`javascript:`/`data:`/`chrome:` URLs rejected. This stops a prompt-injected page from turning the model into a local-file reader or cookie exfiltrator *via this tool*. |
+| Narrow command set | An allowlist of page commands; long flags allowlisted (blocks `--cdp`, `--proxy`, `--headers`, `--init-script`, `--profile`, ...); no `eval`, `cookies`, `storage`, `state`, `download`, `network`. `upload` is allowed only with vetted files and a person's approval (below). `file:`/`javascript:`/`data:`/`chrome:` URLs rejected. This stops a prompt-injected page from turning the model into a local-file reader or cookie exfiltrator *via this tool*. |
 | Injection marking | Page content is returned inside `AGENT_BROWSER_PAGE_CONTENT nonce=...` markers. |
 | Clean protocol | stdout carries only JSON-RPC; tool errors come back in-band. |
 
@@ -40,6 +40,8 @@ An agent that also has a general shell is not constrained by these limits (it ca
 | Policy before decryption | Expiry, use limits and approval are checked before any secret is unsealed; they live in the entry's authenticated metadata. |
 | Lockout protection | A rejected password/TOTP disables automatic login for that entry (`credential_locked`) across processes until a person clears it. |
 | Action gate | In the MCP `browser` tool and `hallpass do`, controls whose label/aria-label/value/title match irreversible patterns (delete, publish, pay, submit, ...) need a native confirmation. Fail-closed. |
+| File upload | `upload` only takes files of a short allowlist of types (app bundles, images, video, documents, archives, plain text), resolved through symlinks, never inside a dot-folder or the hallpass home / OS config locations, with private-key blocks sniffed out of text files. Each batch needs a native dialog naming the files and the site ("Allow once" / "for 1 hour" for that site, held in memory of the MCP server only). `HALLPASS_UPLOAD=off` disables it; `=allow` skips the dialog but keeps the vetting. A shell agent that calls `agent-browser` directly bypasses this, as with the gate. |
+| Screenshots | `screenshot` can only write a file name inside a private (0700) hallpass folder; the agent never chooses a path. |
 | Read-only | `HALLPASS_READONLY=1` on the MCP server permits observation only; set by the person in the client config. |
 | Just-in-time entry | `hallpass request` serves a form on 127.0.0.1 only, behind a 256-bit one-time path, with Host + Origin checks (DNS-rebinding / cross-site posts), a CSRF token, strict CSP, no caching, an 8 KB cap, 5-minute-class expiry and single use. It refuses to overwrite an existing entry. |
 | References | `--password-ref` stores a pointer; the secret is fetched at login and never stored. Reference strings are validated against a strict character set before any CLI call. **Registering a reference is terminal-only**, otherwise an agent could pin a password-manager item to an attacker origin. |

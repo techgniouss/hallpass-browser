@@ -19,7 +19,8 @@ test('guard: only safe browser commands, hallpass sessions, and http(s) URLs get
   ok(['snapshot', '-i']); ok(['click', '@e3']); ok(['fill', '@e2', 'hello -world']); ok(['open', 'https://a.com/x?y=1']);
   ok(['scroll', 'down', '500']); ok(['wait', '--text', 'Saved']); ok(['find', 'role', 'button', 'click', '--name', 'Go']);
   no(['eval', 'document.cookie']); no(['cookies', 'get']); no(['state', 'save', 'x.json']); no(['storage', 'local']);
-  no(['upload', '@e1', 'C:/secret.txt']); no(['download', '@e1', 'x']); no(['network', 'route', 'x']); no(['auth', 'show', 'x']);
+  ok(['upload', 'input[type=file]', '/tmp/a.png']); // allowed through the guard; the files themselves are vetted and approved in runBrowser (upload.test.mjs)
+  no(['download', '@e1', 'x']); no(['network', 'route', 'x']); no(['auth', 'show', 'x']);
   no(['open', 'file:///C:/Windows/win.ini']); no(['open', 'javascript:alert(1)']); no(['tab', 'new', 'data:text/html,hi']);
   no(['snapshot', '--cdp', '9222']); no(['open', 'https://a.com', '--proxy', 'http://evil']); no(['snapshot', '-p']); no(['wait', '--fn', 'document.cookie']);
   no(['snapshot'], 'default'); no(['snapshot'], 'hp-../../x'); no(['snapshot'], 'someone-elses-session');

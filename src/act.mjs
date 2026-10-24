@@ -5,25 +5,41 @@
 //                 native yes/no dialog that only the person can answer. No GUI available = denied.
 //                 HALLPASS_GATE=off|risky|all  (default risky)
 // The gate is a HEURISTIC on the visible label, not a proof: it catches the common dangerous buttons, not every one.
+// `upload` (files from disk into a page) is vetted by upload.mjs and approved per batch; HALLPASS_UPLOAD=ask|allow|off.
 import path from 'node:path';
 import { Browser } from './ab.mjs';
 import { Redactor } from './redact.mjs';
 import { profilesDir } from './paths.mjs';
 import { ask } from './ui.mjs';
 import { audit } from './audit.mjs';
-import { safeUrl } from './origin.mjs';
+import { safeUrl, parseOrigin } from './origin.mjs';
+import { vetUploads, describeFiles, screenshotCommand } from './upload.mjs';
 
-export const ALLOWED = new Set(['open', 'click', 'dblclick', 'fill', 'type', 'press', 'keyboard', 'hover', 'focus', 'check', 'uncheck', 'select', 'scroll', 'scrollintoview', 'wait', 'snapshot', 'get', 'is', 'find', 'tab', 'back', 'forward', 'reload', 'dialog', 'drag', 'highlight']);
+export const ALLOWED = new Set(['open', 'click', 'dblclick', 'fill', 'type', 'press', 'keyboard', 'hover', 'focus', 'check', 'uncheck', 'select', 'scroll', 'scrollintoview', 'wait', 'snapshot', 'get', 'is', 'find', 'tab', 'back', 'forward', 'reload', 'dialog', 'drag', 'highlight', 'upload', 'screenshot']);
 const LONG_FLAGS = new Set(['--full', '--annotate', '--exact', '--name', '--new-tab', '--text', '--url', '--load', '--interactive', '--compact', '--depth', '--selector']);
 const SHORT_FLAGS = new Set(['-i', '-c', '-u', '-d', '-s']);
 const BAD_SCHEME = /^\s*(file|javascript|data|chrome|chrome-extension|view-source|devtools|ftp):/i;
 const SESSION_RE = /^hp-[a-z0-9][a-z0-9._-]{0,62}$/;
 
+// Positions in the argv that are text TO TYPE (release notes, a store description), not flags/selectors/URLs. Such text may
+// legitimately start with "-" or "data:"; it never reaches the CLI's flag parser (see execCommand).
+function payloadStart(command) {
+  const [verb] = command;
+  if (verb === 'fill' || verb === 'type' || verb === 'select') return 2;
+  if (verb === 'keyboard') return 2;
+  if (verb === 'find') { const i = command.findIndex((a, n) => n >= 3 && (a === 'fill' || a === 'type')); return i > 0 ? i + 1 : Infinity; }
+  return Infinity;
+}
+const payloadArgs = (command) => { const at = payloadStart(command); const idx = new Set(); command.forEach((a, n) => { if (n >= at && !(command[0] === 'find' && a.startsWith('--') && LONG_FLAGS.has(a.split('=')[0]))) idx.add(n); }); return idx; };
+
 export function guardBrowser({ session, command }) {
   if (!SESSION_RE.test(session || '')) return 'session must be a hallpass session (hp-...) returned by hallpass_open';
   if (!Array.isArray(command) || !command.length || command.length > 24 || command.some((a) => typeof a !== 'string' || a.length > 4000)) return 'command must be a non-empty array of strings';
   if (!ALLOWED.has(command[0])) return `"${command[0]}" is not available through this tool (allowed: ${[...ALLOWED].join(' ')})`;
-  for (const a of command.slice(1)) {
+  const text = payloadArgs(command);
+  for (let n = 1; n < command.length; n++) {
+    const a = command[n];
+    if (text.has(n)) continue;
     if (a.startsWith('--') && !LONG_FLAGS.has(a.split('=')[0])) return `flag ${a.split('=')[0]} is not allowed`;
     if (/^-[A-Za-z]$/.test(a) && !SHORT_FLAGS.has(a)) return `flag ${a} is not allowed`;
     if (BAD_SCHEME.test(a)) return 'only http(s) URLs are allowed';
@@ -33,7 +49,7 @@ export function guardBrowser({ session, command }) {
 
 // ---- read-only ----
 export const readOnly = () => process.env.HALLPASS_READONLY === '1';
-const WRITE_VERBS = new Set(['click', 'dblclick', 'fill', 'type', 'press', 'keyboard', 'check', 'uncheck', 'select', 'drag', 'dialog']);
+const WRITE_VERBS = new Set(['click', 'dblclick', 'fill', 'type', 'press', 'keyboard', 'check', 'uncheck', 'select', 'drag', 'dialog', 'upload']);
 const FIND_ACTIONS_THAT_WRITE = new Set(['click', 'dblclick', 'fill', 'type', 'check', 'uncheck', 'select', 'hover-click']);
 export function writesState(command) {
   if (WRITE_VERBS.has(command[0])) return true;
@@ -43,7 +59,11 @@ export function writesState(command) {
 
 // ---- gate ----
 export const gateMode = () => { const m = (process.env.HALLPASS_GATE || 'risky').toLowerCase(); return ['off', 'risky', 'all'].includes(m) ? m : 'risky'; };
-export const RISKY = /\b(submit|apply(?! (filter|filters|changes to view))|publish|release|roll ?out|deploy|promote|delete|remove|erase|destroy|terminate|drop|pay|purchase|buy|checkout|place order|order now|subscribe|upgrade|transfer|invite|revoke|disable|deactivate|send for (review|approval)|go live)\b/i;
+export const RISKY = /\b(submit|apply(?! (filter|filters|changes to view))|publish|release|roll ?out|deploy|promote|delete|remove|erase|destroy|terminate|drop|pay|purchase|buy|checkout|place order|order now|subscribe|upgrade|transfer|invite|revoke|disable|deactivate|send\b[^.\n]{0,40}\bfor (review|approval)|go live)\b/i;
+// Labels that contain a risky word but only open an editor or name a field (Play Console: "Create new release", "Release notes").
+// The final, outward-facing buttons ("Start rollout", "Publish", "Send for review") still match. Applied to the visible label only.
+const BENIGN = /\b(create new|review|view|edit)\s+releases?\b|\breleases?\s+(notes?|name|dashboard|history|type|summary|details|track)\b/gi;
+export const isRiskyLabel = (label) => RISKY.test(String(label).replace(BENIGN, ' '));
 // Stems matched as SUBSTRINGS in id/class/name/data-testid (catches deleteBtn, btn-remove, publish_release, ...).
 export const RISKY_ATTR = /(delet|remov|destroy|erase|terminat|publish|release|rollout|deploy|promote|purchase|checkout|subscribe|upgrade|invite|revoke|deactivat|transfer|submit|pay(?!load)|buy)/i;
 const CLICKY = new Set(['click', 'dblclick', 'check', 'uncheck', 'select', 'drag']);
@@ -80,6 +100,46 @@ function labelFor(browser, t) {
   return { label: [0, 1, 2, 3].map(pick).join(' ').slice(0, 300), attrs: [4, 5, 6, 7].map(pick).join(' ').slice(0, 300) };
 }
 
+// ---- uploads ----
+export const uploadMode = () => { const m = (process.env.HALLPASS_UPLOAD || 'ask').toLowerCase(); return ['off', 'ask', 'allow'].includes(m) ? m : 'ask'; };
+const UPLOAD_GRANT_MS = 60 * 60 * 1000;
+const uploadGrants = new Map(); // origin -> expiry; lives in this process only (the long-running MCP server), never on disk
+
+// Returns { error } or { command } with every file replaced by its vetted, symlink-resolved absolute path.
+function authorizeUpload(b, session, command, approver) {
+  if (uploadMode() === 'off') return { error: 'Uploads are disabled on this hallpass server (HALLPASS_UPLOAD=off). Ask the user to upload the file themselves.' };
+  if (!command[1] || command[1].startsWith('-')) return { error: 'usage: upload <selector> <file> [file...]' };
+  const v = vetUploads(command.slice(2));
+  if (v.error) { audit('upload', { session, decision: 'rejected', reason: v.error.slice(0, 120) }); return { error: 'Upload refused: ' + v.error }; }
+  const where = safeUrl((b.run(['get', 'url'], { json: false, timeout: 15_000 }).stdout || '').trim());
+  const origin = parseOrigin(where) || where;
+  const names = v.files.map((f) => path.basename(f.path)).join(', ').slice(0, 200);
+  if (uploadMode() === 'ask' && !((uploadGrants.get(origin) || 0) > Date.now())) {
+    const choice = approver({
+      title: 'Hallpass: confirm file upload',
+      message: `Your AI tool wants to upload ${v.files.length} file${v.files.length > 1 ? 's' : ''} to:\n\n    ${where || 'the current page'}\n\n${describeFiles(v.files)}\n\nApprove only if you asked for this. "Allow for 1 hour" skips this question for ${origin || 'this site'} until then.`,
+      buttons: [{ id: 'deny', label: 'Deny' }, { id: 'hour', label: 'Allow for 1 hour' }, { id: 'once', label: 'Allow once' }],
+      timeoutSec: process.env.HALLPASS_ACTOR === 'mcp' ? 45 : 120,
+    });
+    audit('upload', { session, files: names, url: where, decision: choice || 'deny' });
+    if (choice === 'hour') uploadGrants.set(origin, Date.now() + UPLOAD_GRANT_MS);
+    else if (choice !== 'once') return { error: 'Blocked: the user did not approve this upload (denied, timed out, or no desktop dialog was available). Do not retry. Tell the user which file you wanted to upload and where.' };
+  } else audit('upload', { session, files: names, url: where, decision: 'allowed' });
+  return { command: ['upload', command[1], ...v.files.map((f) => f.path)] };
+}
+
+// Text to type that starts with "-" must not go through the CLI's own flag parser ("--json" or "--headed" would be eaten as
+// options). JSON over stdin (agent-browser `batch`) carries it literally.
+function execCommand(b, command) {
+  const at = payloadStart(command);
+  if (command.slice(at).some((a) => a.startsWith('-')) && ['fill', 'type', 'keyboard', 'select', 'find'].includes(command[0])) {
+    const r = b.batch([command]);
+    const one = r.results[0];
+    return { ok: r.ok, stdout: one?.success ? JSON.stringify(one.result ?? 'ok') : '', stderr: one?.success ? '' : String(one?.error || r.error || 'command failed') };
+  }
+  return b.text(command);
+}
+
 const browserFor = (session) => new Browser({ session, profile: path.join(profilesDir(), session.slice(3)), redactor: new Redactor() });
 
 /** Returns { isError, text }. `approver` is injectable for tests only. */
@@ -107,7 +167,7 @@ export function runBrowser({ session, command }, { approver = ask } = {}) {
     const { label, attrs } = labelFor(b, target);
     // "all" gates every click-like action and keystroke-submits; otherwise: risky words in what the person sees, risky stems
     // in what the developer named it, or a target we cannot identify (find last/nth) which we ask about rather than guess.
-    const risky = mode === 'all' || target.uncertain === true || RISKY.test(label) || RISKY_ATTR.test(attrs);
+    const risky = mode === 'all' || target.uncertain === true || isRiskyLabel(label) || RISKY_ATTR.test(attrs);
     if (risky) {
       const where = safeUrl((b.run(['get', 'url'], { json: false, timeout: 15_000 }).stdout || '').trim());
       const shown = (label.trim() ? label : attrs).replace(/\s+/g, ' ').replace(/["{}\[\]\\]/g, '').replace(/\bresult\b|\btext\b/g, '').trim().slice(0, 90) || '(unlabelled control)';
@@ -122,9 +182,18 @@ export function runBrowser({ session, command }, { approver = ask } = {}) {
     }
   }
 
+  let toRun = command, shot = null;
+  if (command[0] === 'upload') {
+    const u = authorizeUpload(b, session, command, approver);
+    if (u.error) return { isError: true, text: u.error };
+    toRun = u.command;
+  } else if (command[0] === 'screenshot') {
+    ({ command: toRun, file: shot } = screenshotCommand(command));
+  }
   if (writesState(command)) audit('browser', { session, verb: command[0], decision: 'allowed' });
-  const r = b.text(command);
+  const r = execCommand(b, toRun);
   let body = [r.stdout, r.stderr].filter(Boolean).join('\n').trim() || (r.ok ? 'ok' : 'command failed');
   if (body.length > 40_000) body = body.slice(0, 40_000) + '\n[truncated]';
+  if (shot && r.ok) body += `\nSaved to ${shot}`;
   return { isError: !r.ok, text: body };
 }

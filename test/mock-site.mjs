@@ -30,7 +30,7 @@ export function startSite({ user, password, totpCfg, humanPassword = null, alsoA
     const authed = (scenario) => c[`sess_${scenario}`] === 'ok';
     const ok = (scenario) => redirect(res, app(scenario), { 'set-cookie': `sess_${scenario}=ok; Path=/; Max-Age=3600` });
 
-    const m = /^\/(simple|twostep|totp|captcha|badpw|phish|public|invite|bounce|danger|spa)\/(login|password|code|check|app|evil|api)$/.exec(p);
+    const m = /^\/(simple|twostep|totp|captcha|badpw|phish|public|invite|bounce|danger|spa|play)\/(login|password|code|check|app|evil|api)$/.exec(p);
     if (!m) return send(res, page('404', 'nope'), 404);
     const [, s, step] = m;
 
@@ -38,6 +38,8 @@ export function startSite({ user, password, totpCfg, humanPassword = null, alsoA
     if (s === 'bounce') return redirect(res, `http://localhost:${port}/public/app`);
     if (s === 'danger' && step === 'password') return send(res, page('Settings', '<h1>Settings</h1><input id="note" type="search" placeholder="note"><input id="pw" type="password" value="demo-typed-secret" aria-label="Password">'));
     if (s === 'danger') return send(res, page('Console', "<h1>Console</h1><input id=\"note\" type=\"search\" placeholder=\"note\"><button id=\"del\" onclick=\"document.title=&quot;DELETED&quot;\">Delete account</button> <button id=\"next\" onclick=\"document.title=&quot;NEXT&quot;\">Next</button> <button id=\"icon\" aria-label=\"Publish release\" onclick=\"document.title=&quot;PUBLISHED&quot;\">&#9733;</button> <button id=\"trash\" class=\"icon-btn btn-delete-user\" onclick=\"document.title=&quot;TRASHED&quot;\">&#128465;</button> <input id=\"sub\" type=\"submit\" value=\"Submit application\" onclick=\"document.title=&quot;SUBMITTED&quot;\">"));
+    // A Play-Console-shaped release page: a hidden file input behind a visible button, a notes box, a harmless and a real "go" button.
+    if (s === 'play') return send(res, page('Releases', '<h1>Internal testing</h1><button id="create" onclick="document.title=&quot;CREATED&quot;">Create new release</button> <button id="up" onclick="document.getElementById(&quot;f&quot;).click()">Upload</button><input id="f" type="file" multiple style="display:none" onchange="document.getElementById(&quot;o&quot;).textContent=[...this.files].map(f=>f.name+&quot;:&quot;+f.size).join(&quot;,&quot;)"><textarea id="notes" aria-label="Release notes"></textarea><pre id="o"></pre><button id="go" onclick="document.title=&quot;ROLLED&quot;">Start rollout to Internal testing</button>'));
     if (s === 'public') return send(res, page('Docs', '<h1>Public docs</h1>'));
     if (step === 'app') return authed(s) ? send(res, page('Dashboard', '<h1>Welcome back</h1><input type="search" placeholder="Search">')) : redirect(res, `/${s}/login`);
 

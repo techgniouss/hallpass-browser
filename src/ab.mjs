@@ -120,7 +120,13 @@ export class Browser {
     try { return typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return null; }
   }
 
-  close() { return this.run(['close'], { timeout: 30_000 }); }
+  // `close` returns before the daemon has finished exiting, and for a second or two `session list` still shows the session. A
+  // relaunch (headless to headed) or a quick logout-then-open in that window would talk to the dying daemon, so wait it out.
+  close() {
+    const r = this.run(['close'], { timeout: 30_000 });
+    for (let i = 0; i < 24 && this.alive(); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+    return r;
+  }
   // Is there a live session by this name? Must NOT use a page command: on a missing session those silently
   // launch a new blank browser, which would make "closed" look like "open".
   alive() {

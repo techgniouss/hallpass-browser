@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.4.0 (end-to-end workflow audit: "publish my app to Play Console")
+
+Fixed
+- **File uploads were impossible.** The `browser` tool and `hallpass do` blocked `upload`, so an agent could open Play Console and fill forms but never attach an `.aab` or store screenshots. `upload <selector> <files...>` now works (including hidden file inputs), with strict file vetting and a per-batch native approval (`HALLPASS_UPLOAD=ask|allow|off`).
+- Text to type could be refused or mangled: release notes or descriptions beginning with `--`, or with a prefix such as `Data:` / `file:`, were rejected by the command guard, and a lone `--json` / `--headed` would have been eaten by the CLI's flag parser. Typed text is now exempt from the flag/URL checks and travels over stdin when it starts with `-`.
+- The action gate missed "Send 7 changes for review" (Play Console's real label); and it interrupted routine, reversible clicks such as "Create new release". Both corrected.
+
+Added
+- `screenshot [--full] [name.png]` through the browser tool, written to a private folder (the agent picks a name, never a path).
+- A Play Console publishing playbook in the skill, and instructions about uploads for MCP clients.
+- `hallpass doctor` flags `HALLPASS_UPLOAD=allow`. Tests: `test/upload.test.mjs` (vetting, guard, real-browser upload, dashes, screenshot, gate labels).
+
 ## 1.3.0 (packaging for open source)
 
 Added
