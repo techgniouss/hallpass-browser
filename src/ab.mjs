@@ -6,7 +6,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { createRequire } from 'node:module';
 import { home } from './paths.mjs';
+
+export const runtimeDir = () => path.join(home(), 'runtime');
 
 // The agent-browser binary receives every typed secret on stdin, so WHICH binary it is must not be steerable from the
 // agent's shell. There is no env override, and once resolved the absolute path is pinned in config.json: a later
@@ -18,7 +21,7 @@ const pinned = () => { const p = readCfg().agentBrowser; return typeof p === 'st
 const pin = (p) => { try { fs.writeFileSync(cfgFile(), JSON.stringify({ ...readCfg(), agentBrowser: p }), { mode: 0o600 }); } catch { /* best effort */ } };
 
 // The agent-browser release line this version of hallpass was developed and tested against. Newer lines may change CLI output.
-export const TESTED_AGENT_BROWSER = '0.27';
+export const TESTED_AGENT_BROWSER = '0.39';
 
 let binCache;
 export function findBinary({ repin = false } = {}) {
@@ -32,25 +35,37 @@ export function findBinary({ repin = false } = {}) {
   return (binCache = found);
 }
 
-function resolveFromPath() {
+// The native binary inside an agent-browser package folder, or null. Linux has glibc and musl builds; take whichever exists.
+function nativeIn(pkgDir) {
   const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
-  const exe = { win32: 'agent-browser-win32-x64.exe', darwin: `agent-browser-darwin-${arch}`, linux: `agent-browser-linux-${arch}` }[process.platform];
+  const names = { win32: ['agent-browser-win32-x64.exe'], darwin: [`agent-browser-darwin-${arch}`], linux: [`agent-browser-linux-${arch}`, `agent-browser-linux-musl-${arch}`] }[process.platform] || [];
+  for (const n of names) { const p = path.join(pkgDir, 'bin', n); if (fs.existsSync(p)) return p; }
+  return null;
+}
+
+// Where agent-browser may come from, in trust order. Our own dependency and our own runtime folder come BEFORE anything an
+// environment variable or PATH could steer; the result is then pinned (see above).
+function resolveFromPath() {
+  let own = null;
+  try { own = nativeIn(path.dirname(createRequire(import.meta.url).resolve('agent-browser/package.json'))); } catch { /* not a dependency here (e.g. plugin install) */ }
+  own = own || nativeIn(path.join(runtimeDir(), 'node_modules', 'agent-browser'));
+  if (own) return (binCache = own);
   for (const d of (process.env.PATH || '').split(path.delimiter)) {
     for (const n of ['agent-browser.cmd', 'agent-browser.exe', 'agent-browser']) {
       const p = path.join(d, n);
       if (!fs.existsSync(p)) continue;
       // npm global layout: <prefix>/agent-browser(.cmd) beside <prefix>/node_modules/agent-browser/bin/<native>
-      const native = path.join(d, 'node_modules', 'agent-browser', 'bin', exe);
-      if (fs.existsSync(native)) return (binCache = native);
+      const native = nativeIn(path.join(d, 'node_modules', 'agent-browser'));
+      if (native) return (binCache = native);
       if (!p.endsWith('.cmd')) return (binCache = p);
     }
   }
   try {
     const root = execFileSync('npm', ['root', '-g'], { encoding: 'utf8', shell: process.platform === 'win32' }).trim();
-    const native = path.join(root, 'agent-browser', 'bin', exe);
-    if (fs.existsSync(native)) return (binCache = native);
+    const native = nativeIn(path.join(root, 'agent-browser'));
+    if (native) return (binCache = native);
   } catch { /* fall through */ }
-  throw new Error('agent-browser not found. Install it: npm i -g agent-browser && agent-browser install');
+  throw new Error('agent-browser not found. Run: hallpass setup   (or: npm i -g agent-browser && agent-browser install)');
 }
 
 export class Browser {

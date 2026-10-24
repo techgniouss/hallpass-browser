@@ -136,6 +136,8 @@ If the session expires mid-task you land on a login wall again: `hallpass open <
 | `credential_expired` / `credential_exhausted` | the credential's expiry or use limit was reached | tell the user; they renew it with `hallpass add <name> --force` |
 | `secret_unavailable` | the password manager (op/bw/pass) was locked, signed out, or missing | ask the user to unlock it, then retry once |
 | `browser_closed` / `page_unreachable` | the window was closed, or the site is offline/unreachable | run `hallpass open <url>` again; check the URL |
+| `setting_up` | first run: hallpass is installing agent-browser and Chrome (one time) | tell the user, wait about a minute, then run the same open once more |
+| `not_installed` | that automatic install failed or is disabled; `detail` says why | show the user `detail`; they run `hallpass setup` (Linux may need `agent-browser install --with-deps`) |
 | `bad_url` | URL not https (http only for localhost) | fix the URL |
 | `timeout` / `browser_error` | page never settled / browser would not start | `hallpass status <name>`, take a screenshot, report |
 

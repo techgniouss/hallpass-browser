@@ -3,11 +3,14 @@
 ## 1.4.0 (end-to-end workflow audit: "publish my app to Play Console")
 
 Fixed
+- **The action gate failed open on newer agent-browser releases**, and whenever a click target's label could not be read: a verbose lookup result pushed the real label ("Delete account") past a length cap, so the click was waved through. Labels are now read from the result's `text`/`value` field, and an unreadable target is treated as risky (the person is asked).
+- **Fresh installs got a Chrome that agent-browser 0.27 cannot drive in a visible window** (Chrome 156 opens an extra New Tab and 0.27 attaches to that, so the login hand-off saw a blank page). The tested line moves to agent-browser 0.39.2, which handles it.
 - **File uploads were impossible.** The `browser` tool and `hallpass do` blocked `upload`, so an agent could open Play Console and fill forms but never attach an `.aab` or store screenshots. `upload <selector> <files...>` now works (including hidden file inputs), with strict file vetting and a per-batch native approval (`HALLPASS_UPLOAD=ask|allow|off`).
 - Text to type could be refused or mangled: release notes or descriptions beginning with `--`, or with a prefix such as `Data:` / `file:`, were rejected by the command guard, and a lone `--json` / `--headed` would have been eaten by the CLI's flag parser. Typed text is now exempt from the flag/URL checks and travels over stdin when it starts with `-`.
 - The action gate missed "Send 7 changes for review" (Play Console's real label); and it interrupted routine, reversible clicks such as "Create new release". Both corrected.
 
 Added
+- **Zero-prerequisite install.** agent-browser is now a dependency (`~0.39.2`) and Chrome is fetched by an npm postinstall; if either is missing at run time (plugin installs never run npm) hallpass installs it itself: synchronously with progress in a terminal, in the background for the MCP server (`hallpass_open` answers `setting_up` meanwhile). `hallpass setup` runs it by hand, `hallpass doctor` checks Chrome, `HALLPASS_NO_AUTO_INSTALL=1` disables it. agent-browser is resolved from our own dependency / `~/.hallpass/runtime` before PATH, and musl Linux builds are found.
 - `screenshot [--full] [name.png]` through the browser tool, written to a private folder (the agent picks a name, never a path).
 - A Play Console publishing playbook in the skill, and instructions about uploads for MCP clients.
 - `hallpass doctor` flags `HALLPASS_UPLOAD=allow`. Tests: `test/upload.test.mjs` (vetting, guard, real-browser upload, dashes, screenshot, gate labels).

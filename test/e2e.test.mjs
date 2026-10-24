@@ -47,9 +47,11 @@ async function hp(args, input, extraEnv = {}) {
   try { json = JSON.parse(r.out.trim().split(/\r?\n/).pop()); } catch { /* not json */ }
   return { code: r.code, json, out: r.out, err: r.err };
 }
-async function ab(session, args) {
+async function ab(session, args, { headed = false } = {}) {
   // like hallpass itself, and like `hallpass do`: without --profile agent-browser attaches to a blank tab, not the page the person sees
-  const r = await run('agent-browser', ['--session', session, '--profile', path.join(HOME, 'profiles', session.slice(3)), '--json', ...args], { shell: process.platform === 'win32' });
+  // and with the same launch settings: newer agent-browser releases treat a different HEADED/IDLE setting as a different browser
+  const env = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '7200000', ...process.env, AGENT_BROWSER_HEADED: headed ? 'true' : 'false' };
+  const r = await run('agent-browser', ['--session', session, '--profile', path.join(HOME, 'profiles', session.slice(3)), '--json', ...args], { shell: process.platform === 'win32', env });
   return { ok: r.code === 0, out: r.out };
 }
 async function add(name, scenario, { password = PASSWORD, withTotp = false, extra = [] } = {}) {
@@ -159,7 +161,7 @@ test('CAPTCHA: hands over to a visible window, then resumes after the human acts
   assert.equal(r.json.mode, 'headed');
   assert.equal(r.code, 10);
   // play the human: click the checkbox in the visible window
-  const click = await ab('hp-captcha', ['click', '#human']);
+  const click = await ab('hp-captcha', ['click', '#human'], { headed: true });
   assert.ok(click.ok, 'human click: ' + click.out);
   const resumed = await hp(['resume', 'captcha', '--timeout', '60']);
   assert.equal(resumed.json?.status, 'logged_in', resumed.out + resumed.err);
@@ -182,9 +184,9 @@ test('open: no credential + login wall -> person logs in, then later opens are h
   const session = r.json.session;
   assert.equal(site.log.posts.filter((p) => p.host.startsWith('127.0.0.1') && p.path === '/simple/login').length, 0, 'hallpass must not submit anything in human mode');
   // the simulated person types into the visible window
-  assert.ok((await ab(session, ['fill', 'input[name=email]', USER])).ok);
-  assert.ok((await ab(session, ['fill', 'input[name=password]', HUMAN_PW])).ok);
-  assert.ok((await ab(session, ['click', 'button[type=submit]'])).ok);
+  assert.ok((await ab(session, ['fill', 'input[name=email]', USER], { headed: true })).ok);
+  assert.ok((await ab(session, ['fill', 'input[name=password]', HUMAN_PW], { headed: true })).ok);
+  assert.ok((await ab(session, ['click', 'button[type=submit]'], { headed: true })).ok);
   const resumed = await hp(['resume', r.json.name, '--timeout', '60']);
   assert.equal(resumed.json?.status, 'logged_in', resumed.out + resumed.err);
   assert.equal(resumed.json.via, 'human');
@@ -238,7 +240,7 @@ test('--lock-navigation: a hostile redirect is blocked and nothing reaches the a
 test('closing the window mid-login: resume says so instead of spawning a blank browser', { timeout: 300_000 }, async () => {
   const r = await hp(['open', `http://127.0.0.1:${site.port}/twostep/app`]);
   assert.equal(r.json?.status, 'needs_human', r.out + r.err);
-  await ab(r.json.session, ['close']);
+  await ab(r.json.session, ['close'], { headed: true });
   // `close` returns before the daemon has exited (it still shows in `session list` for a second or two)
   for (let i = 0; i < 30 && (await run('agent-browser', ['session', 'list'], { shell: process.platform === 'win32' })).out.includes(r.json.session); i++) await new Promise((res) => setTimeout(res, 300));
   const st = await hp(['status', r.json.name]);

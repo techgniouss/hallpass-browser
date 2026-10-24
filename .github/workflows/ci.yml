@@ -18,11 +18,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - name: Install agent-browser
+      - name: Install (agent-browser is a dependency; the postinstall is skipped in CI, so fetch Chrome explicitly)
         shell: bash
         run: |
-          npm i -g agent-browser
-          if [ "$RUNNER_OS" = "Linux" ]; then agent-browser install --with-deps; else agent-browser install; fi
+          npm install
+          if [ "$RUNNER_OS" = "Linux" ]; then npx agent-browser install --with-deps; else npx agent-browser install; fi
       - name: Unit tests (no browser)
         run: npm test
       - name: Browser tests (Linux needs a virtual display for the headed hand-off tests)

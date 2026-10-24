@@ -20,7 +20,7 @@ Hallpass wraps [agent-browser](https://github.com/vercel-labs/agent-browser) wit
 
 ## Install
 
-Requirements: **Node 20+** and [agent-browser](https://www.npmjs.com/package/agent-browser) (`npm i -g agent-browser && agent-browser install`).
+Requirements: **Node 20+**. Nothing else to install: [agent-browser](https://www.npmjs.com/package/agent-browser) (the program that drives Chrome) is a dependency of this package, and Chrome for it is downloaded automatically (about 150 MB, once) by `npm i`, or on first use if that step was skipped. This also covers plugin installs (Claude Code, Codex, Gemini), where `npm` never runs: the first `hallpass_open` answers `setting_up` while it installs in the background, and works a minute later. `hallpass setup` does it by hand; `HALLPASS_NO_AUTO_INSTALL=1` turns it all off. On a bare Linux box Chrome may need system libraries: `agent-browser install --with-deps` (hallpass never runs apt for you).
 
 ```bash
 npm i -g hallpass-browser      # gives you the `hallpass` command
@@ -101,7 +101,7 @@ Everything runs against local mock sites. The detection corpus is structural re-
 ## Known limits
 
 - Only **Windows** has been exercised. macOS (Keychain, osascript) and Linux (libsecret, zenity) paths exist but are unrun; `.github/workflows/ci.yml` is written to cover them and has never been run.
-- **agent-browser compatibility:** tested against 0.27.x. Newer releases may change output formats; `hallpass doctor` tells you which version you have.
+- **agent-browser compatibility:** tested against 0.39.x (0.27.x also needs a Chrome older than about 155: its headed window loses the page on newer Chrome). Other releases may change output formats; `hallpass doctor` tells you which version you have.
 - Logins inside **iframes or shadow DOM** are not auto-filled (the page still reads as a login wall, so a person is asked). Sites needing extra fields (e.g. AWS IAM account ID) need a site recipe (not built, see [ROADMAP](ROADMAP.md)).
 - **Passkeys/WebAuthn**, reading **email/SMS codes**, and a **separate-user broker** are not built.
 - The **action gate** is a heuristic on labels: it catches common dangerous buttons, not every one, and a shell agent can bypass it by calling `agent-browser` directly.

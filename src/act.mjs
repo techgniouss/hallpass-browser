@@ -95,9 +95,14 @@ function labelFor(browser, t) {
   const q = [['get', 'text', t.ref], ['get', 'attr', t.ref, 'aria-label'], ['get', 'attr', t.ref, 'value'], ['get', 'attr', t.ref, 'title'],
     ['get', 'attr', t.ref, 'id'], ['get', 'attr', t.ref, 'class'], ['get', 'attr', t.ref, 'name'], ['get', 'attr', t.ref, 'data-testid']];
   const r = browser.run(['batch'], { input: JSON.stringify(q), timeout: 25_000 });
-  if (!Array.isArray(r.json)) return { label: '', attrs: '' };
-  const pick = (i) => JSON.stringify(r.json[i]?.result ?? '').toLowerCase();
-  return { label: [0, 1, 2, 3].map(pick).join(' ').slice(0, 300), attrs: [4, 5, 6, 7].map(pick).join(' ').slice(0, 300) };
+  if (!Array.isArray(r.json)) return { label: '', attrs: '', unreadable: true };
+  // Each result is { text } / { value } (plus, in newer agent-browser releases, a long "lifecycle" block): take the field that holds
+  // the text itself. Stringifying the whole object would let the bookkeeping push the real label past the length cap.
+  const pick = (i) => { const x = r.json[i]?.result; const v = x && typeof x === 'object' ? (x.text ?? x.value ?? x.attr ?? '') : (x ?? ''); return JSON.stringify(String(v)).toLowerCase(); };
+  const label = [0, 1, 2, 3].map(pick).join(' ').slice(0, 300), attrs = [4, 5, 6, 7].map(pick).join(' ').slice(0, 300);
+  // None of the eight lookups worked (selector matched nothing, page changed, CLI output not understood): we cannot tell what
+  // this click does, so the caller asks the person instead of assuming it is harmless.
+  return { label, attrs, unreadable: !r.json.some((x) => x?.success) };
 }
 
 // ---- uploads ----
@@ -164,10 +169,10 @@ export function runBrowser({ session, command }, { approver = ask } = {}) {
   const mode = gateMode();
   const target = mode === 'off' ? null : clickTarget(command);
   if (target) {
-    const { label, attrs } = labelFor(b, target);
+    const { label, attrs, unreadable } = labelFor(b, target);
     // "all" gates every click-like action and keystroke-submits; otherwise: risky words in what the person sees, risky stems
     // in what the developer named it, or a target we cannot identify (find last/nth) which we ask about rather than guess.
-    const risky = mode === 'all' || target.uncertain === true || isRiskyLabel(label) || RISKY_ATTR.test(attrs);
+    const risky = mode === 'all' || target.uncertain === true || unreadable === true || isRiskyLabel(label) || RISKY_ATTR.test(attrs);
     if (risky) {
       const where = safeUrl((b.run(['get', 'url'], { json: false, timeout: 15_000 }).stdout || '').trim());
       const shown = (label.trim() ? label : attrs).replace(/\s+/g, ' ').replace(/["{}\[\]\\]/g, '').replace(/\bresult\b|\btext\b/g, '').trim().slice(0, 90) || '(unlabelled control)';

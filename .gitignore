@@ -20,3 +20,6 @@ audit.log
 credentials*.json
 *-credentials.json
 *.export.json
+
+# not shipped; the dependency range in package.json is what we test
+package-lock.json

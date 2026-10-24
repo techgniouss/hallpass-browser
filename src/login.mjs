@@ -12,6 +12,7 @@ import { totp, secondsLeft, parseTotpInput } from './totp.mjs';
 import { profilesDir, stateDir } from './paths.mjs';
 import { checkEligibility, authorizeUse } from './policy.mjs';
 import { audit } from './audit.mjs';
+import { ensureReady } from './setup.mjs';
 import { notify } from './ui.mjs';
 import { resolveSecrets, resolveRef, looksLikeCode, SecretUnavailable } from './refs.mjs';
 
@@ -317,6 +318,8 @@ function openFailed(ctx, opened) {
 
 // ---------- public API ----------
 async function loginImpl(name, o = {}) {
+  const notReady = ensureReady(); // agent-browser + Chrome are installed on first use
+  if (notReady) return { name, ...notReady };
   const release = lock(name);
   let ctx;
   try {
@@ -367,6 +370,8 @@ async function loginImpl(name, o = {}) {
 //   mode headed:   visible window, the PERSON logs in (nothing is ever typed for them).
 //   mode headless: never opens a window; a login wall is reported as needs_human.
 async function openSiteImpl(url, o = {}) {
+  const notReady = ensureReady();
+  if (notReady) return notReady;
   if (typeof url === 'string' && !/^[a-z][a-z0-9+.-]*:\/\//i.test(url.trim())) {
     // bare "play.google.com/console" works; local dev servers default to http
     url = (/^(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?(\/|$)/i.test(url.trim()) ? 'http://' : 'https://') + url.trim();

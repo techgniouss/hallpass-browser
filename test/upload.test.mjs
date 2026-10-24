@@ -1,7 +1,7 @@
 // File upload, screenshot-to-file, and typed text that looks like a flag: vetting (no browser) and the real thing (browser).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -128,7 +128,7 @@ test('real browser: upload to a hidden file input, approval, and the one-hour gr
     process.env.HALLPASS_UPLOAD = 'off';
     assert.match(run(s, ['upload', '#f', png], () => 'once').text, /disabled/);
     delete process.env.HALLPASS_UPLOAD;
-  } finally { run(s, ['snapshot']); spawn(process.execPath, [BIN, 'logout', opened.name], { env: { ...process.env, HALLPASS_HOME: HOME } }); }
+  } finally { run(s, ['snapshot']); spawnSync(process.execPath, [BIN, 'logout', opened.name], { env: { ...process.env, HALLPASS_HOME: HOME } }); }
 });
 
 test('real browser: release notes starting with dashes, screenshot to a file, and routine vs final buttons', { timeout: 300_000 }, async () => {
@@ -147,10 +147,15 @@ test('real browser: release notes starting with dashes, screenshot to a file, an
     assert.ok(fs.statSync(saved).size > 500, 'a real PNG was written');
     assert.equal(fs.existsSync(path.join(FILES, '..', 'evil.png')), false);
 
+    // a click whose label cannot be read is not waved through: the person is asked (fail closed)
+    let asked = '';
+    run(s, ['click', '#no-such-element'], ({ message }) => { asked = message; return 'deny'; });
+    assert.match(asked, /confirm|wants to click/i, 'an unreadable target is put to the person');
+
     process.env.HALLPASS_NO_UI = '1';
     assert.equal(run(s, ['click', '#create']).isError, false, '"Create new release" is not interrupted');
     assert.match(run(s, ['get', 'title']).text, /CREATED/);
     assert.match(run(s, ['click', '#go']).text, /Blocked/, '"Start rollout" needs the person');
     assert.ok(!/ROLLED/.test(run(s, ['get', 'title']).text));
-  } finally { spawn(process.execPath, [BIN, 'logout', opened.name], { env: { ...process.env, HALLPASS_HOME: HOME } }); }
+  } finally { spawnSync(process.execPath, [BIN, 'logout', opened.name], { env: { ...process.env, HALLPASS_HOME: HOME } }); }
 });

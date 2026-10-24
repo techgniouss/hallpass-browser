@@ -13,6 +13,7 @@ import { Redactor } from './redact.mjs';
 import { login, openSite, resume, status, logout } from './login.mjs';
 import { startCredentialRequest, describeRequest } from './request.mjs';
 import { guardBrowser, runBrowser } from './act.mjs';
+import { startBackgroundSetup } from './setup.mjs';
 export { guardBrowser };
 import { profilesDir } from './paths.mjs';
 
@@ -31,7 +32,7 @@ WORKFLOW
 - Call hallpass_open with the URL of the page the task is about (deep links are fine). It returns one of:
   * status "logged_in": use the returned "session" with the "browser" tool (start with command ["snapshot","-i"]).
   * status "needs_human": a Chrome window is open on a login wall / CAPTCHA / MFA. Tell the user plainly what to do in that window, WAIT for their reply, then call hallpass_resume with the returned "name". Do not poll.
-  * status "failed": read "reason" and "detail"; do not loop.
+  * status "failed": read "reason" and "detail"; do not loop. Reason "setting_up" is the exception: hallpass is installing its browser components on first run, so tell the user, wait about a minute, and call hallpass_open once more.
 - A stored credential matching the site is used automatically (headless, you never see it). Otherwise the user logs in themselves in the visible window, and the saved profile makes later opens instant.
 - If hallpass_open shows a login wall and the user would like hands-free logins, call hallpass_request_credential with the site's login URL: a one-time form opens in THEIR browser, they type the login, you never see it. Then wait for their reply and call hallpass_open again.
 - If several stored credentials match the site you get reason "ambiguous_credential": ask the user which account, then call hallpass_open again with "as".
@@ -159,6 +160,7 @@ export async function handle(msg) {
 
 export function serve() {
   process.env.HALLPASS_ACTOR = 'mcp'; // shown in approval dialogs and recorded in the audit log
+  startBackgroundSetup(); // installs agent-browser + Chrome in the background on first run; a no-op once they are present
   const rl = readline.createInterface({ input: process.stdin });
   let chain = Promise.resolve();
   rl.on('line', (line) => {
