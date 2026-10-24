@@ -18,20 +18,27 @@ export const runtimeDir = () => path.join(home(), 'runtime');
 const cfgFile = () => path.join(home(), 'config.json');
 const readCfg = () => { try { return JSON.parse(fs.readFileSync(cfgFile(), 'utf8')); } catch { return {}; } };
 const pinned = () => { const p = readCfg().agentBrowser; return typeof p === 'string' && fs.existsSync(p) ? p : null; };
-const pin = (p) => { try { fs.writeFileSync(cfgFile(), JSON.stringify({ ...readCfg(), agentBrowser: p }), { mode: 0o600 }); } catch { /* best effort */ } };
+const pin = (p, { human = false } = {}) => { try { fs.writeFileSync(cfgFile(), JSON.stringify({ ...readCfg(), agentBrowser: p, agentBrowserPinnedBy: human ? 'person' : 'auto' }), { mode: 0o600 }); } catch { /* best effort */ } };
+export const pinnedByHuman = () => readCfg().agentBrowserPinnedBy === 'person';
 
 // The agent-browser release line this version of hallpass was developed and tested against. Newer lines may change CLI output.
 export const TESTED_AGENT_BROWSER = '0.39';
 
 let binCache;
-export function findBinary({ repin = false } = {}) {
+export function findBinary({ repin = false, human = false } = {}) {
   if (!repin) {
     if (binCache) return binCache;
     const p = pinned();
+    // Our own copy (this package's dependency, or ~/.hallpass/runtime) is the one hallpass was tested with and is not steerable
+    // from a shell, so it replaces an older pin to some other install (typically a global agent-browser from before hallpass
+    // shipped its own). A pin to anything else stays: choosing a different agent-browser is a human decision (`doctor --repin`).
+    const own = ownBinary();
+    if (p && (!own || p === own)) return (binCache = p);
+    if (own && p && !pinnedByHuman()) { pin(own); return (binCache = own); }
     if (p) return (binCache = p);
   }
   const found = resolveFromPath();
-  pin(found);
+  pin(found, { human });
   return (binCache = found);
 }
 
@@ -39,16 +46,34 @@ export function findBinary({ repin = false } = {}) {
 function nativeIn(pkgDir) {
   const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
   const names = { win32: ['agent-browser-win32-x64.exe'], darwin: [`agent-browser-darwin-${arch}`], linux: [`agent-browser-linux-${arch}`, `agent-browser-linux-musl-${arch}`] }[process.platform] || [];
-  for (const n of names) { const p = path.join(pkgDir, 'bin', n); if (fs.existsSync(p)) return p; }
+  for (const n of names) {
+    const p = path.join(pkgDir, 'bin', n);
+    if (!fs.existsSync(p)) continue;
+    // npm run with --ignore-scripts leaves the binary without its execute bit: fix it rather than fail later with "permission denied"
+    if (process.platform !== 'win32') { try { fs.accessSync(p, fs.constants.X_OK); } catch { try { fs.chmodSync(p, 0o755); } catch { continue; } } }
+    return p;
+  }
   return null;
 }
+
+/** Hallpass's own agent-browser: the package dependency, else the copy installed under ~/.hallpass/runtime. Never PATH. */
+export function ownBinary() {
+  try { const own = nativeIn(path.dirname(createRequire(import.meta.url).resolve('agent-browser/package.json'))); if (own) return own; } catch { /* not a dependency here */ }
+  return nativeIn(path.join(runtimeDir(), 'node_modules', 'agent-browser'));
+}
+
+/** "0.39.2" for a binary, or null. */
+export function versionOf(bin) {
+  const r = spawnSync(bin, ['--version'], { encoding: 'utf8', timeout: 15_000, windowsHide: true });
+  return /(\d+\.\d+\.\d+)/.exec(r.stdout || '')?.[1] || null;
+}
+/** true when a version is on an older minor line than the one hallpass is tested with. */
+export const olderThanTested = (v) => { const a = String(v || '').split('.').map(Number), b = TESTED_AGENT_BROWSER.split('.').map(Number); return a.length >= 2 && !a.some(Number.isNaN) && (a[0] < b[0] || (a[0] === b[0] && a[1] < b[1])); };
 
 // Where agent-browser may come from, in trust order. Our own dependency and our own runtime folder come BEFORE anything an
 // environment variable or PATH could steer; the result is then pinned (see above).
 function resolveFromPath() {
-  let own = null;
-  try { own = nativeIn(path.dirname(createRequire(import.meta.url).resolve('agent-browser/package.json'))); } catch { /* not a dependency here (e.g. plugin install) */ }
-  own = own || nativeIn(path.join(runtimeDir(), 'node_modules', 'agent-browser'));
+  const own = ownBinary();
   if (own) return (binCache = own);
   for (const d of (process.env.PATH || '').split(path.delimiter)) {
     for (const n of ['agent-browser.cmd', 'agent-browser.exe', 'agent-browser']) {

@@ -3,6 +3,8 @@
 ## 1.4.0 (end-to-end workflow audit: "publish my app to Play Console")
 
 Fixed
+- **An old pin kept an old agent-browser forever.** Users who had pinned a global agent-browser (0.27, the version that breaks on current Chrome) kept it after upgrading, and `doctor` called it fine. Hallpass's own copy now replaces an automatic pin (a pin the person made with `doctor --repin` is respected and flagged), `setup` installs 0.39.x for plugin installs that have no bundled copy, `doctor` flags older lines, and a binary without its execute bit is repaired.
+- A failed first-run install (offline, proxy, disk) is reported to the agent as `not_installed` with the reason, instead of `setting_up` forever.
 - **The action gate failed open on newer agent-browser releases**, and whenever a click target's label could not be read: a verbose lookup result pushed the real label ("Delete account") past a length cap, so the click was waved through. Labels are now read from the result's `text`/`value` field, and an unreadable target is treated as risky (the person is asked).
 - **Fresh installs got a Chrome that agent-browser 0.27 cannot drive in a visible window** (Chrome 156 opens an extra New Tab and 0.27 attaches to that, so the login hand-off saw a blank page). The tested line moves to agent-browser 0.39.2, which handles it.
 - **File uploads were impossible.** The `browser` tool and `hallpass do` blocked `upload`, so an agent could open Play Console and fill forms but never attach an `.aab` or store screenshots. `upload <selector> <files...>` now works (including hidden file inputs), with strict file vetting and a per-batch native approval (`HALLPASS_UPLOAD=ask|allow|off`).

@@ -11,13 +11,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { home, stateDir } from './paths.mjs';
-import { findBinary, TESTED_AGENT_BROWSER, runtimeDir } from './ab.mjs';
+import { findBinary, TESTED_AGENT_BROWSER, runtimeDir, versionOf, olderThanTested, ownBinary, pinnedByHuman } from './ab.mjs';
 
 const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'hallpass.mjs');
 const win = process.platform === 'win32';
 export const autoInstallOff = () => process.env.HALLPASS_NO_AUTO_INSTALL === '1';
 const lockFile = () => path.join(stateDir(), 'setup.lock');
 const logFile = () => path.join(stateDir(), 'setup.log');
+const failFile = () => path.join(stateDir(), 'setup-failed.json');
 const say = (log, m) => { try { log?.(m); } catch { /* ignore */ } };
 
 /** { agentBrowser: path|null, browser: bool|null (null = cannot tell) } without installing anything. */
@@ -25,11 +26,12 @@ export function inspect() {
   let bin = null;
   try { bin = findBinary(); } catch { /* not installed */ }
   let browser = null;
+  const version = bin ? versionOf(bin) : null;
   if (bin) {
     const r = spawnSync(bin, ['doctor', '--quick', '--offline', '--json'], { encoding: 'utf8', timeout: 60_000, windowsHide: true });
     try { browser = JSON.parse(r.stdout).checks.find((c) => c.id === 'chrome.installed')?.status === 'pass'; } catch { /* older/newer CLI: unknown */ }
   }
-  return { agentBrowser: bin, browser };
+  return { agentBrowser: bin, version, outdated: olderThanTested(version) && !pinnedByHuman(), browser }; // a version a person pinned on purpose is left alone (doctor warns)
 }
 
 // A positive answer is remembered for 12 hours (per pinned binary), so ordinary opens do not pay for a `doctor` run each time.
@@ -40,7 +42,7 @@ const markedOk = () => { try { const m = JSON.parse(fs.readFileSync(okFile(), 'u
 export const ready = () => {
   if (markedOk()) return true;
   const s = inspect();
-  const ok = !!s.agentBrowser && s.browser !== false;
+  const ok = !!s.agentBrowser && s.browser !== false && !s.outdated;
   if (ok) markOk(s.agentBrowser);
   return ok;
 };
@@ -60,10 +62,11 @@ export function setup({ log } = {}) {
   try { bin = findBinary(); } catch { /* install below */ }
   const did = [];
   const rt = bin ? inspect() : { browser: false };
-  const needChrome = rt.browser !== true; // "cannot tell" runs the (idempotent) installer too
-  if ((!bin || rt.browser === false) && autoInstallOff()) throw new Error('something is missing and automatic install is disabled (HALLPASS_NO_AUTO_INSTALL=1). Run: npm i -g agent-browser && agent-browser install');
-  if (!bin) {
-    say(log, `installing agent-browser ${TESTED_AGENT_BROWSER}.x into ${runtimeDir()} ...`);
+  const stale = !!bin && rt.outdated && !ownBinary(); // an old agent-browser pinned from before hallpass shipped its own
+  const needChrome = rt.browser !== true || stale; // "cannot tell" runs the (idempotent) installer too
+  if ((!bin || rt.browser === false || stale) && autoInstallOff()) throw new Error('something is missing and automatic install is disabled (HALLPASS_NO_AUTO_INSTALL=1). Run: npm i -g agent-browser && agent-browser install');
+  if (!bin || stale) {
+    say(log, stale ? `agent-browser ${rt.version} is older than the ${TESTED_AGENT_BROWSER}.x line hallpass needs; installing ${TESTED_AGENT_BROWSER}.x into ${runtimeDir()} ...` : `installing agent-browser ${TESTED_AGENT_BROWSER}.x into ${runtimeDir()} ...`);
     fs.mkdirSync(runtimeDir(), { recursive: true });
     run('npm', ['install', '--prefix', runtimeDir(), '--no-audit', '--no-fund', '--loglevel=error', `agent-browser@~${TESTED_AGENT_BROWSER}.2`], log);
     bin = findBinary({ repin: true });
@@ -77,8 +80,14 @@ export function setup({ log } = {}) {
     did.push('chrome');
   }
   markOk(bin);
+  clearFailure();
   return { status: 'ready', installed: did, agent_browser: bin };
 }
+
+/** A failed background install is remembered for 10 minutes, so the agent hears the real reason instead of "setting up" forever. */
+export function recordFailure(detail) { try { fs.mkdirSync(stateDir(), { recursive: true }); fs.writeFileSync(failFile(), JSON.stringify({ at: Date.now(), detail: String(detail).slice(0, 400) })); } catch { /* ignore */ } }
+export function clearFailure() { try { fs.rmSync(failFile()); } catch { /* none */ } }
+export function recentFailure() { try { const f = JSON.parse(fs.readFileSync(failFile(), 'utf8')); return Date.now() - f.at < 10 * 60_000 ? f.detail : null; } catch { return null; } }
 
 const alivePid = (pid) => { try { process.kill(pid, 0); return pid !== process.pid; } catch { return false; } };
 export function settingUp() {
@@ -113,6 +122,8 @@ export function ensureReady() {
   if (ready()) return null;
   if (autoInstallOff()) return { status: 'failed', reason: 'not_installed', detail: 'agent-browser or Chrome is missing and automatic install is disabled. Run: hallpass setup (or npm i -g agent-browser && agent-browser install)' };
   if (process.env.HALLPASS_ACTOR === 'mcp') {
+    const failed = recentFailure();
+    if (failed && !settingUp()) return { status: 'failed', reason: 'not_installed', detail: `The automatic first-run install failed: ${failed}. Tell the user; they can fix the cause (network, proxy, disk) and run: hallpass setup` };
     startBackgroundSetup();
     return { status: 'failed', reason: 'setting_up', detail: 'First-run setup is installing the browser components (agent-browser and Chrome, one time, a minute or two). Tell the user, wait about a minute, then call hallpass_open again.' };
   }

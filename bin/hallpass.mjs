@@ -24,7 +24,7 @@ import { exportVault, importVault } from '../src/portable.mjs';
 import { listSessions, pruneSessions } from '../src/sessions.mjs';
 import { parseRef, resolveRef, SecretUnavailable } from '../src/refs.mjs';
 import { serve } from '../src/mcp.mjs';
-import { setup, inspect as inspectRuntime, withLock } from '../src/setup.mjs';
+import { setup, inspect as inspectRuntime, withLock, recordFailure } from '../src/setup.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const out = (obj, code = 0) => { process.stdout.write(JSON.stringify(obj) + '\n'); process.exit(code); };
@@ -291,12 +291,12 @@ switch (cmd) {
     const { values: dv } = opts({ repin: { type: 'boolean' } }, false);
     if (dv.repin) { // changes WHICH agent-browser receives your typed secrets: a person must do this
       if (!isTTY()) usage('hallpass doctor --repin needs a real terminal: it decides which program receives your typed secrets.');
-      out({ status: 'repinned', agent_browser: safe(() => findBinary({ repin: true })) });
+      out({ status: 'repinned', agent_browser: safe(() => findBinary({ repin: true, human: true })) });
     }
     const checks = [];
     const add = (name, okk, detail) => checks.push({ name, ok: okk, detail });
     add('node >= 20', Number(process.versions.node.split('.')[0]) >= 20, process.versions.node);
-    try { const bin = findBinary(); const rt = inspectRuntime(); add('chrome for agent-browser', rt.browser !== false, rt.browser === false ? 'not installed: run hallpass setup' : rt.browser ? 'installed' : 'could not tell (older/newer agent-browser)'); const r = spawnSync(bin, ['--version'], { encoding: 'utf8' }); const ver = /(\d+\.\d+)\.\d+/.exec(r.stdout || '')?.[1]; add('agent-browser', r.status === 0, `${(r.stdout || '').trim()} (pinned: ${bin})`); add('agent-browser compatibility', true, ver === TESTED_AGENT_BROWSER ? `${ver}.x is the tested release line` : `NOTE: hallpass was tested with ${TESTED_AGENT_BROWSER}.x; you have ${ver || 'unknown'}. It may work, but report anything odd`); } catch (e) { add('agent-browser', false, e.message); }
+    try { const bin = findBinary(); const rt = inspectRuntime(); add('chrome for agent-browser', rt.browser !== false, rt.browser === false ? 'not installed: run hallpass setup' : rt.browser ? 'installed' : 'could not tell (older/newer agent-browser)'); const r = spawnSync(bin, ['--version'], { encoding: 'utf8' }); const ver = /(\d+\.\d+)\.\d+/.exec(r.stdout || '')?.[1]; add('agent-browser', r.status === 0, `${(r.stdout || '').trim()} (pinned: ${bin})`); add('agent-browser compatibility', !(rt.outdated), ver === TESTED_AGENT_BROWSER ? `${ver}.x is the tested release line` : rt.outdated ? `agent-browser ${rt.version} is older than the ${TESTED_AGENT_BROWSER}.x line; on current Chrome its visible login window can lose the page. Run: hallpass setup` : `NOTE: hallpass was tested with ${TESTED_AGENT_BROWSER}.x; you have ${ver || 'unknown'}. It may work, but report anything odd`); } catch (e) { add('agent-browser', false, e.message); }
     try { const b = backend(); const k = masterKey({ create: false }); add('keystore', true, `${b.name}; master key ${k ? 'present' : 'not created yet (created on first "hallpass add")'}`); } catch (e) { add('keystore', false, e.message); }
     add('home dir', true, home());
     try { const c = verifyLog(); add('audit log', c.ok, c.ok ? `${c.entries} entries, chain intact` : `TAMPERED or damaged at entry ${c.broken_at}: ${c.reason}`); } catch (e) { add('audit log', false, e.message); }
@@ -321,7 +321,7 @@ switch (cmd) {
   case 'setup': {
     const { values: v } = opts({ background: { type: 'boolean' } }, false);
     try { out({ ...withLock(() => setup({ log: (m) => m && process.stderr.write(`hallpass setup: ${m}\n`) })), ...inspectRuntime() }); }
-    catch (e) { out({ status: 'failed', reason: 'setup_failed', detail: e.message }, 1); }
+    catch (e) { if (v.background) recordFailure(e.message); out({ status: 'failed', reason: 'setup_failed', detail: e.message }, 1); }
     break;
   }
   case 'mcp': serve(); break; // stdio MCP server; stays alive until the client closes stdin
