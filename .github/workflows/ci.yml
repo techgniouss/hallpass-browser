@@ -16,7 +16,7 @@ jobs:
       HALLPASS_KEYSTORE: ${{ runner.os == 'Windows' && '' || 'file' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: 22 }
       - name: Install (agent-browser is a dependency; the postinstall is skipped in CI, so fetch Chrome explicitly)
         shell: bash
