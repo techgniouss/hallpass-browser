@@ -15,7 +15,7 @@ jobs:
       # Linux/macOS runners have no usable OS keyring: opt in to the file keystore (Windows uses DPAPI)
       HALLPASS_KEYSTORE: ${{ runner.os == 'Windows' && '' || 'file' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - name: Install (agent-browser is a dependency; the postinstall is skipped in CI, so fetch Chrome explicitly)
