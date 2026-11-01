@@ -69,6 +69,6 @@
     "url": "https://github.com/techgniouss/hallpass-browser/issues"
   },
   "dependencies": {
-    "agent-browser": "~0.39.2"
+    "agent-browser": "~0.40.0"
   }
 }
