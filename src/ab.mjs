@@ -1,7 +1,7 @@
 // Thin, hardened wrapper around the agent-browser CLI.
 //  - secrets only ever travel over stdin (JSON `batch`), never argv, so they are not visible in process listings
 //  - every byte coming back is passed through the Redactor before anything can print or log it
-import { spawnSync, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -93,6 +93,38 @@ function resolveFromPath() {
   throw new Error('agent-browser not found. Run: hallpass setup   (or: npm i -g agent-browser && agent-browser install)');
 }
 
+// Google refuses sign-in ("Couldn't sign you in / This browser or app may not be secure") in Chrome for Testing, the build
+// agent-browser downloads. A person's own installed Chrome or Edge is accepted, so prefer it. HALLPASS_BROWSER=<path> forces one.
+// Also supports config.json "browser": "edge" | "chrome" | "/path/to/browser".
+export function systemBrowser() {
+  const cfgBrowser = readCfg().browser;
+  const env = process.env.HALLPASS_BROWSER || (cfgBrowser && fs.existsSync(cfgBrowser) ? cfgBrowser : null);
+  if (env) return fs.existsSync(env) ? env : null;
+  const pf = [process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA].filter(Boolean);
+  const cands = {
+    win32: pf.flatMap((d) => [path.join(d, 'Google', 'Chrome', 'Application', 'chrome.exe'), path.join(d, 'Microsoft', 'Edge', 'Application', 'msedge.exe')]),
+    darwin: ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'],
+    linux: ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/microsoft-edge', '/usr/bin/microsoft-edge-stable'],
+  }[process.platform] || [];
+  const preferEdge = /edge/i.test(process.env.HALLPASS_BROWSER || cfgBrowser || '');
+  const rank = (p) => (preferEdge ? (/edge/i.test(p) ? 0 : 1) : (/edge/i.test(p) ? 1 : 0));
+  return cands.filter((p) => fs.existsSync(p)).sort((a, b) => rank(a) - rank(b))[0] || null;
+}
+
+// Google will not accept a sign-in typed into a browser that is being remote-controlled. So for that one step the person signs in
+// in a plain, un-automated Chrome/Edge window that uses the same profile folder; closing the window saves the cookies, and the
+// automated session then reopens on that profile already signed in. Resolves true once the window was closed by the person.
+export function signInManually(profile, url, { timeoutMs = 15 * 60_000 } = {}) {
+  const exe = systemBrowser();
+  if (!exe) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const p = spawn(exe, [`--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', url], { stdio: 'ignore' });
+    const t = setTimeout(() => { try { p.kill(); } catch { /* already gone */ } }, timeoutMs);
+    p.on('error', () => { clearTimeout(t); resolve(false); });
+    p.on('exit', () => { clearTimeout(t); setTimeout(() => resolve(true), 1500); }); // let Chrome flush its cookie store
+  });
+}
+
 export class Browser {
   constructor({ session, profile, headed = false, redactor, allowedDomains = null }) {
     Object.assign(this, { session, profile, headed, redactor, allowedDomains });
@@ -106,6 +138,13 @@ export class Browser {
     return f;
   }
 
+  // Launch settings for the browser daemon (read when the session's first command starts it). A default only: a user-set
+  // AGENT_BROWSER_EXECUTABLE_PATH wins because process.env is spread after this.
+  _launchEnv() {
+    const exe = systemBrowser();
+    return exe ? { AGENT_BROWSER_EXECUTABLE_PATH: exe } : {};
+  }
+
   run(args, { input, timeout = 60_000, json: wantJson = true, env: extraEnv = {}, bare = false } = {}) {
     // Output goes to temp files, not pipes: the first command of a session spawns a long-lived daemon that
     // inherits our stdio, and a pipe would never reach EOF (spawnSync would hang until its timeout).
@@ -116,7 +155,7 @@ export class Browser {
     try {
       r = spawnSync(findBinary(), [...(bare ? ['--json'] : this._flags(wantJson)), ...args], {
         input, timeout, windowsHide: false, stdio: [input === undefined ? 'ignore' : 'pipe', fo, fe],
-        env: { AGENT_BROWSER_IDLE_TIMEOUT_MS: '7200000', ...process.env, AGENT_BROWSER_HEADED: this.headed ? 'true' : 'false', ...extraEnv },
+        env: { AGENT_BROWSER_IDLE_TIMEOUT_MS: '7200000', ...this._launchEnv(), ...process.env, AGENT_BROWSER_HEADED: this.headed ? 'true' : 'false', ...extraEnv },
       });
     } finally { fs.closeSync(fo); fs.closeSync(fe); }
     const read = (f) => { try { return fs.readFileSync(path.join(dir, f), 'utf8'); } catch { return ''; } };

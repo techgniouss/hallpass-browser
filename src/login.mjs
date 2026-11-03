@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as vault from './vault.mjs';
-import { Browser } from './ab.mjs';
+import { Browser, systemBrowser, signInManually } from './ab.mjs';
 import { probeScript, tagSel } from './probe.mjs';
 import { Redactor } from './redact.mjs';
 import { isAllowed, safeUrl as rawSafeUrl, globToRegExp, parseOrigin, sameSite } from './origin.mjs';
@@ -399,7 +399,19 @@ async function openSiteImpl(url, o = {}) {
     const opened = ctx.browser.open(url);
     if (!opened.ok) return openFailed(ctx, opened);
     let r = await drive(ctx, { wait: false, noFill: true, deadline: deadline() });
-    if (r.status === 'needs_human' && !ctx.browser.headed && mode !== 'headless') {
+    const googleHost = (u) => /^https?:\/\/([^/]+\.)?(google\.com|google\.play)(\/|:|$)/i.test(u || '');
+    if (r.status === 'needs_human' && mode !== 'headless' && (googleHost(url) || googleHost(r.url)) && systemBrowser()) {
+      // Google rejects sign-in in an automated browser: the person signs in in a plain window on the same profile first.
+      note(ctx, 'google sign-in: plain window for the user, then reopening automated');
+      ctx.browser.close();
+      notify('Hallpass needs you', 'Sign in to Google in the Chrome window, then close that window to continue.');
+      await signInManually(ctx.profile, 'https://accounts.google.com/ServiceLogin?continue=' + encodeURIComponent(url));
+      ctx.browser = ctx.mk(true);
+      ctx.reset();
+      const again = ctx.browser.open(url);
+      if (!again.ok) return fail(ctx, 'browser_error', again.error || again.stderr || 'could not reopen the browser after sign-in');
+      r = await drive(ctx, { wait: false, noFill: true, deadline: deadline() });
+    } else if (r.status === 'needs_human' && !ctx.browser.headed && mode !== 'headless') {
       note(ctx, 'login wall: relaunching headed for the user');
       ctx.browser.close();
       ctx.browser = ctx.mk(true);
