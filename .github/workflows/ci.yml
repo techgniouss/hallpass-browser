@@ -12,10 +12,12 @@ jobs:
     env:
       HALLPASS_NO_UI: '1'               # no desktop dialogs/notifications in CI; approvals fail closed
       HALLPASS_SKIP_DIALOG_TEST: '1'    # the native-dialog test needs an interactive desktop
-      # Linux/macOS runners have no usable OS keyring: opt in to the file keystore (Windows uses DPAPI)
-      HALLPASS_KEYSTORE: ${{ runner.os == 'Windows' && '' || 'file' }}
     steps:
       - uses: actions/checkout@v4
+      - name: Keystore (Linux/macOS runners have no usable OS keyring: opt in to the file keystore; Windows uses DPAPI)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: echo "HALLPASS_KEYSTORE=file" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - name: Install (agent-browser is a dependency; the postinstall is skipped in CI, so fetch Chrome explicitly)
