@@ -47,6 +47,19 @@ test('upload vetting: batches are bounded and resolve to absolute paths', () => 
   try { const r = vetUploads(['phone-1.png']); assert.equal(path.isAbsolute(r.files[0].path), true); } finally { process.chdir(prev); }
 });
 
+test('upload vetting (Windows): the OS temp folder may be uploaded from, the rest of AppData stays fenced', { skip: process.platform !== 'win32' }, () => {
+  const base = fs.mkdtempSync(path.join(FILES, 'lad-'));
+  const saved = ['LOCALAPPDATA', 'TEMP', 'TMP'].map((k) => [k, process.env[k]]);
+  process.env.LOCALAPPDATA = base; process.env.TEMP = process.env.TMP = path.join(base, 'Temp');
+  const at = (rel) => { const f = path.join(base, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, 'data-data'); return f; };
+  try {
+    assert.equal(vetUploadFile(at('Temp/claude/shot.png')).ok, true, 'a file under the temp folder is allowed');
+    assert.match(vetUploadFile(at('Other/shot.png')).error, /protected/, 'another AppData folder is still fenced');
+    assert.match(vetUploadFile(at('shot.png')).error, /protected/, 'a file directly in AppData is still fenced');
+    assert.match(vetUploadFile(at('TempEvil/shot.png')).error, /protected/, 'a sibling that only shares the prefix is fenced');
+  } finally { for (const [k, v] of saved) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
+});
+
 test('screenshot names cannot escape the output folder', () => {
   const out = process.env.HALLPASS_OUT;
   for (const given of ['../../etc/passwd', '/etc/cron.d/x', '..\\..\\x', '.hidden', 'a b?.png']) {

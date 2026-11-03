@@ -4,6 +4,7 @@
 
 Added
 - **`activate <target> [Enter|Space]`**: focus a control and press a key, for pages where a pointer click returns success but does nothing (Play Console's sticky Save bar, dialog and wizard buttons). Gated like `click`; MCP guard and skill updated.
+- **Uploads from the OS temp folder.** On Windows (and macOS) the fence around `%LOCALAPPDATA%` / `~/Library` also blocked the temp folder, so files an agent staged there (a scratch directory, a generated screenshot) were refused as "protected". The temp folder alone is now allowed; the rest of AppData / Library, the hallpass home and dot-folders stay fenced. Per-upload approval and the file-type and private-key checks are unchanged.
 - A click, double click, check or uncheck that fails with "is covered by ..." now scrolls the target into view and retries once.
 
 ## 1.4.0 (end-to-end workflow audit: "publish my app to Play Console")

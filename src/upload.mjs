@@ -18,12 +18,14 @@ export const UPLOAD_EXT = new Set(['aab', 'apk', 'png', 'jpg', 'jpeg', 'webp', '
 const TEXTLIKE = new Set(['txt', 'csv', 'md']);
 const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|"private_key"\s*:/;
 
-// The person's home folder and OS locations that hold other programs' secrets or state.
+// The person's home folder and OS locations that hold other programs' secrets or state. `soft` folders contain the OS temp
+// folder (Windows: %LOCALAPPDATA%\Temp), where tools legitimately stage files to upload, so the temp folder alone is carved
+// back out of them (see vetUploadFile). The hallpass home is never soft, even when HALLPASS_HOME points into a temp folder.
 function fenced() {
   const h = os.homedir();
-  const dirs = [home(), '/etc', '/proc', '/sys', '/dev', '/root/.ssh'];
-  if (process.platform === 'darwin') dirs.push(path.join(h, 'Library'));
-  if (process.platform === 'win32') for (const v of ['APPDATA', 'LOCALAPPDATA', 'ProgramData']) if (process.env[v]) dirs.push(process.env[v]);
+  const dirs = [home(), '/etc', '/proc', '/sys', '/dev', '/root/.ssh'].map((dir) => ({ dir, soft: false }));
+  if (process.platform === 'darwin') dirs.push({ dir: path.join(h, 'Library'), soft: true });
+  if (process.platform === 'win32') for (const v of ['APPDATA', 'LOCALAPPDATA', 'ProgramData']) if (process.env[v]) dirs.push({ dir: process.env[v], soft: true });
   return dirs;
 }
 
@@ -46,9 +48,12 @@ export function vetUploadFile(p, { cwd = process.cwd() } = {}) {
   const ext = path.extname(name).slice(1).toLowerCase();
   if (!UPLOAD_EXT.has(ext)) return { ok: false, error: `".${ext || '(none)'}" files cannot be uploaded through hallpass (allowed: ${[...UPLOAD_EXT].join(' ')}). Credentials, keys and config files are deliberately excluded; the user can upload those by hand.` };
   if (real.split(path.sep).some((c) => c.startsWith('.') && c.length > 1)) return { ok: false, error: `${name} is inside a hidden/config folder, which hallpass will not upload from. Copy the file somewhere ordinary first.` };
-  for (const d of fenced()) {
-    const rd = realOrNull(d) || d;
-    if (inside(real, rd)) return { ok: false, error: `${name} is inside a protected location and will not be uploaded.` };
+  const tmp = realOrNull(os.tmpdir());
+  for (const { dir, soft } of fenced()) {
+    const rd = realOrNull(dir) || dir;
+    if (!inside(real, rd)) continue;
+    if (soft && tmp && inside(real, tmp) && !inside(tmp, real)) continue; // a file in the OS temp folder, not the folder itself or what is above it
+    return { ok: false, error: `${name} is inside a protected location and will not be uploaded.` };
   }
   if (TEXTLIKE.has(ext)) {
     const fd = fs.openSync(real, 'r');
