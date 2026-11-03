@@ -15,11 +15,14 @@ import { audit } from './audit.mjs';
 import { safeUrl, parseOrigin } from './origin.mjs';
 import { vetUploads, describeFiles, screenshotCommand } from './upload.mjs';
 
-export const ALLOWED = new Set(['open', 'click', 'dblclick', 'fill', 'type', 'press', 'keyboard', 'hover', 'focus', 'check', 'uncheck', 'select', 'scroll', 'scrollintoview', 'wait', 'snapshot', 'get', 'is', 'find', 'tab', 'back', 'forward', 'reload', 'dialog', 'drag', 'highlight', 'upload', 'screenshot']);
+export const ALLOWED = new Set(['open', 'click', 'activate', 'dblclick', 'fill', 'type', 'press', 'keyboard', 'hover', 'focus', 'check', 'uncheck', 'select', 'scroll', 'scrollintoview', 'wait', 'snapshot', 'get', 'is', 'find', 'tab', 'back', 'forward', 'reload', 'dialog', 'drag', 'highlight', 'upload', 'screenshot']);
 const LONG_FLAGS = new Set(['--full', '--annotate', '--exact', '--name', '--new-tab', '--text', '--url', '--load', '--interactive', '--compact', '--depth', '--selector']);
 const SHORT_FLAGS = new Set(['-i', '-c', '-u', '-d', '-s']);
 const BAD_SCHEME = /^\s*(file|javascript|data|chrome|chrome-extension|view-source|devtools|ftp):/i;
 const SESSION_RE = /^hp-[a-z0-9][a-z0-9._-]{0,62}$/;
+// `activate <target> [Enter|Space]`: focus the control and press the key a keyboard user would. Some pages (Play Console's sticky
+// Save bar, Material buttons in dialogs) swallow or mis-aim a pointer click while the same control works from the keyboard.
+const ACTIVATE_KEYS = new Set(['Enter', 'Space']);
 
 // Positions in the argv that are text TO TYPE (release notes, a store description), not flags/selectors/URLs. Such text may
 // legitimately start with "-" or "data:"; it never reaches the CLI's flag parser (see execCommand).
@@ -36,6 +39,7 @@ export function guardBrowser({ session, command }) {
   if (!SESSION_RE.test(session || '')) return 'session must be a hallpass session (hp-...) returned by hallpass_open';
   if (!Array.isArray(command) || !command.length || command.length > 24 || command.some((a) => typeof a !== 'string' || a.length > 4000)) return 'command must be a non-empty array of strings';
   if (!ALLOWED.has(command[0])) return `"${command[0]}" is not available through this tool (allowed: ${[...ALLOWED].join(' ')})`;
+  if (command[0] === 'activate' && (command.length < 2 || command.length > 3 || (command[2] !== undefined && !ACTIVATE_KEYS.has(command[2])))) return 'usage: activate <@ref|selector> [Enter|Space]';
   const text = payloadArgs(command);
   for (let n = 1; n < command.length; n++) {
     const a = command[n];
@@ -49,7 +53,7 @@ export function guardBrowser({ session, command }) {
 
 // ---- read-only ----
 export const readOnly = () => process.env.HALLPASS_READONLY === '1';
-const WRITE_VERBS = new Set(['click', 'dblclick', 'fill', 'type', 'press', 'keyboard', 'check', 'uncheck', 'select', 'drag', 'dialog', 'upload']);
+const WRITE_VERBS = new Set(['click', 'activate', 'dblclick', 'fill', 'type', 'press', 'keyboard', 'check', 'uncheck', 'select', 'drag', 'dialog', 'upload']);
 const FIND_ACTIONS_THAT_WRITE = new Set(['click', 'dblclick', 'fill', 'type', 'check', 'uncheck', 'select', 'hover-click']);
 export function writesState(command) {
   if (WRITE_VERBS.has(command[0])) return true;
@@ -66,7 +70,7 @@ const BENIGN = /\b(create new|review|view|edit)\s+releases?\b|\breleases?\s+(not
 export const isRiskyLabel = (label) => RISKY.test(String(label).replace(BENIGN, ' '));
 // Stems matched as SUBSTRINGS in id/class/name/data-testid (catches deleteBtn, btn-remove, publish_release, ...).
 export const RISKY_ATTR = /(delet|remov|destroy|erase|terminat|publish|release|rollout|deploy|promote|purchase|checkout|subscribe|upgrade|invite|revoke|deactivat|transfer|submit|pay(?!load)|buy)/i;
-const CLICKY = new Set(['click', 'dblclick', 'check', 'uncheck', 'select', 'drag']);
+const CLICKY = new Set(['click', 'activate', 'dblclick', 'check', 'uncheck', 'select', 'drag']);
 const FIND_BY_SELECTOR = new Set(['first', 'last', 'nth']);
 
 function clickTarget(command) {
@@ -145,6 +149,24 @@ function execCommand(b, command) {
   return b.text(command);
 }
 
+const RETRY_COVERED = new Set(['click', 'dblclick', 'check', 'uncheck']);
+
+// One command, with the two recoveries a pointer-driven page needs. The gate has already approved this exact action, so both
+// recoveries repeat it rather than doing anything new.
+//   activate   -> focus + keypress (a keyboard "click")
+//   click etc. -> "covered by <sticky footer>": scroll the target into view once and retry
+function runAction(b, command) {
+  if (command[0] === 'activate') {
+    const f = execCommand(b, ['focus', command[1]]);
+    return f.ok ? execCommand(b, ['press', command[2] || 'Enter']) : f;
+  }
+  let r = execCommand(b, command);
+  if (!r.ok && RETRY_COVERED.has(command[0]) && /is covered by/i.test(`${r.stdout}\n${r.stderr}`)) {
+    if (execCommand(b, ['scrollintoview', command[1]]).ok) r = execCommand(b, command);
+  }
+  return r;
+}
+
 const browserFor = (session) => new Browser({ session, profile: path.join(profilesDir(), session.slice(3)), redactor: new Redactor() });
 
 /** Returns { isError, text }. `approver` is injectable for tests only. */
@@ -196,7 +218,7 @@ export function runBrowser({ session, command }, { approver = ask } = {}) {
     ({ command: toRun, file: shot } = screenshotCommand(command));
   }
   if (writesState(command)) audit('browser', { session, verb: command[0], decision: 'allowed' });
-  const r = execCommand(b, toRun);
+  const r = runAction(b, toRun);
   let body = [r.stdout, r.stderr].filter(Boolean).join('\n').trim() || (r.ok ? 'ok' : 'command failed');
   if (body.length > 40_000) body = body.slice(0, 40_000) + '\n[truncated]';
   if (shot && r.ok) body += `\nSaved to ${shot}`;

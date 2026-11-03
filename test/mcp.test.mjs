@@ -25,6 +25,8 @@ test('guard: only safe browser commands, hallpass sessions, and http(s) URLs get
   no(['snapshot', '--cdp', '9222']); no(['open', 'https://a.com', '--proxy', 'http://evil']); no(['snapshot', '-p']); no(['wait', '--fn', 'document.cookie']);
   no(['snapshot'], 'default'); no(['snapshot'], 'hp-../../x'); no(['snapshot'], 'someone-elses-session');
   no([]); no('snapshot'); no(['snapshot', 'x'.repeat(5000)]);
+  ok(['activate', '@e3']); ok(['activate', '@e3', 'Space']); ok(['activate', 'button.save', 'Enter']);
+  no(['activate']); no(['activate', '@e3', 'Escape']); no(['activate', '@e3', 'Enter', 'x']); no(['activate', '@e3', '--cdp']);
 });
 
 test('installers write marked blocks, are idempotent, and never clobber existing content', () => {

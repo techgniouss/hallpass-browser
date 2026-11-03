@@ -88,6 +88,15 @@ hallpass do <session> open https://.../another/page
 
 Refs go stale after page changes; re-snapshot. If you later land on a login wall again, run `hallpass open <url>` again.
 
+**A click reports `Done` but nothing happens** (typical on Play Console: the sticky Save bar, buttons inside dialogs, wizard Next buttons): use `activate` instead. It focuses the control and presses Enter (or `Space` as a third argument), exactly what a keyboard user does, and it is confirmed by the user like any other click.
+
+```bash
+hallpass do <session> activate @e12          # focus + Enter
+hallpass do <session> activate @e12 Space    # focus + Space (checkbox-like and some Material buttons)
+```
+
+If a click fails with "is covered by ...", hallpass already scrolls the target into view and retries once; if it still fails, use `activate`. After any Save, confirm it stuck (reload and look, or read the "Change saved" text) before telling the user it is done.
+
 ### Irreversible actions are confirmed by the user, not by you
 
 Through the MCP `browser` tool, and through `hallpass do <session> <command...>` in a shell, clicks that look irreversible or outward-facing (delete, publish, pay, submit, apply, start rollout, send for review, invite, ...) pop a dialog **the user** must approve. If you get "Blocked: the user did not approve", do **not** retry, rephrase, or find another route to the same effect. Tell the user exactly what you wanted to do and let them decide. Prefer `hallpass do` over calling `agent-browser` directly for clicks on pages that can change things. If the server is read-only you can observe but not change anything.

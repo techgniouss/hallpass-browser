@@ -29,7 +29,7 @@ test('classifier: developer-chosen names catch icon-only buttons', () => {
 });
 
 test('writesState: observation vs. changing the page', () => {
-  for (const c of [['click', '@e1'], ['fill', '@e1', 'x'], ['type', '@e1', 'x'], ['press', 'Enter'], ['select', '@e1', 'a'], ['check', '@e1'], ['find', 'role', 'button', 'click', '--name', 'Go']]) assert.ok(writesState(c), c.join(' '));
+  for (const c of [['click', '@e1'], ['activate', '@e1'], ['fill', '@e1', 'x'], ['type', '@e1', 'x'], ['press', 'Enter'], ['select', '@e1', 'a'], ['check', '@e1'], ['find', 'role', 'button', 'click', '--name', 'Go']]) assert.ok(writesState(c), c.join(' '));
   for (const c of [['snapshot', '-i'], ['get', 'text', '@e1'], ['scroll', 'down'], ['open', 'https://a.com'], ['wait', '--text', 'x'], ['find', 'text', 'Hi', 'get'], ['tab', 'list']]) assert.ok(!writesState(c), c.join(' '));
 });
 
@@ -132,6 +132,27 @@ test('gate: when the person approves, the action runs; when they deny, it does n
     const allowed = runBrowser({ session: s, command: ['click', '#del'] }, { approver: ({ message }) => { assert.match(message, /Delete account/i); assert.match(message, /127\.0\.0\.1/); return 'once'; } });
     assert.equal(allowed.isError, false, allowed.text);
     assert.match(await title(c, s), /DELETED/);
+    await c.call('hallpass_logout', { name: opened.name });
+  } finally { c.close(); }
+});
+
+test('activate: a keyboard click runs harmless buttons and is gated exactly like click', { timeout: 300_000 }, async () => {
+  const c = mcp({ HALLPASS_NO_UI: '1', HALLPASS_GATE: 'off' }); // gate off just to open the page
+  try {
+    const opened = JSON.parse((await c.call('hallpass_open', { url: `http://127.0.0.1:${port}/danger/app` })).content[0].text);
+    const s = opened.session;
+    const ok = runBrowser({ session: s, command: ['activate', '#next'] }, { approver: () => { throw new Error('a harmless button must not ask'); } });
+    assert.equal(ok.isError, false, ok.text);
+    assert.match(await title(c, s), /NEXT/);
+    const denied = runBrowser({ session: s, command: ['activate', '#del'] }, { approver: () => 'deny' });
+    assert.equal(denied.isError, true);
+    assert.ok(!/DELETED/.test(await title(c, s)), 'denied: nothing ran');
+    let asked = '';
+    const allowed = runBrowser({ session: s, command: ['activate', '#del', 'Space'] }, { approver: ({ message }) => { asked = message; return 'once'; } });
+    assert.match(asked, /Delete account/i);
+    assert.equal(allowed.isError, false, allowed.text);
+    assert.match(await title(c, s), /DELETED/);
+    assert.equal(runBrowser({ session: s, command: ['activate', '#next', 'Escape'] }).isError, true);
     await c.call('hallpass_logout', { name: opened.name });
   } finally { c.close(); }
 });
