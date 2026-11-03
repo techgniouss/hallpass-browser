@@ -14,7 +14,8 @@ jobs:
       HALLPASS_SKIP_DIALOG_TEST: '1'    # the native-dialog test needs an interactive desktop
     steps:
       - uses: actions/checkout@v4
-      - name: Keystore (Linux/macOS runners have no usable OS keyring: opt in to the file keystore; Windows uses DPAPI)
+      # Linux/macOS runners have no usable OS keyring, so opt in to the file keystore (Windows uses DPAPI)
+      - name: File keystore on Linux and macOS
         if: runner.os != 'Windows'
         shell: bash
         run: echo "HALLPASS_KEYSTORE=file" >> "$GITHUB_ENV"
