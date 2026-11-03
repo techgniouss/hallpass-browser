@@ -101,7 +101,7 @@ Everything runs against local mock sites. The detection corpus is structural re-
 ## Known limits
 
 - Only **Windows** has been exercised. macOS (Keychain, osascript) and Linux (libsecret, zenity) paths exist but are unrun; `.github/workflows/ci.yml` is written to cover them and has never been run.
-- **agent-browser compatibility:** tested against 0.39.x (0.27.x also needs a Chrome older than about 155: its headed window loses the page on newer Chrome). Other releases may change output formats; `hallpass doctor` tells you which version you have.
+- **agent-browser compatibility:** tested against 0.41.x (0.27.x also needs a Chrome older than about 155: its headed window loses the page on newer Chrome). Other releases may change output formats; `hallpass doctor` tells you which version you have.
 - Logins inside **iframes or shadow DOM** are not auto-filled (the page still reads as a login wall, so a person is asked). Sites needing extra fields (e.g. AWS IAM account ID) need a site recipe (not built, see [ROADMAP](ROADMAP.md)).
 - **Passkeys/WebAuthn**, reading **email/SMS codes**, and a **separate-user broker** are not built.
 - The **action gate** is a heuristic on labels: it catches common dangerous buttons, not every one, and a shell agent can bypass it by calling `agent-browser` directly.

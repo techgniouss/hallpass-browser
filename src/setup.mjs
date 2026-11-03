@@ -68,7 +68,7 @@ export function setup({ log } = {}) {
   if (!bin || stale) {
     say(log, stale ? `agent-browser ${rt.version} is older than the ${TESTED_AGENT_BROWSER}.x line hallpass needs; installing ${TESTED_AGENT_BROWSER}.x into ${runtimeDir()} ...` : `installing agent-browser ${TESTED_AGENT_BROWSER}.x into ${runtimeDir()} ...`);
     fs.mkdirSync(runtimeDir(), { recursive: true });
-    run('npm', ['install', '--prefix', runtimeDir(), '--no-audit', '--no-fund', '--loglevel=error', `agent-browser@~${TESTED_AGENT_BROWSER}.2`], log);
+    run('npm', ['install', '--prefix', runtimeDir(), '--no-audit', '--no-fund', '--loglevel=error', `agent-browser@~${TESTED_AGENT_BROWSER}.1`], log);
     bin = findBinary({ repin: true });
     did.push('agent-browser');
   }

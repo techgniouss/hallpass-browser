@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.5.0 (activate, temp-folder uploads, click retry)
+
+Changed
+- The tested agent-browser line moves from 0.39.x to **0.41.x** (`~0.41.1`).
+- Test fix: the setup tests imported a bare `C:/...` path, which Node rejects on Windows; they now use a `file://` URL.
 
 Added
 - **`activate <target> [Enter|Space]`**: focus a control and press a key, for pages where a pointer click returns success but does nothing (Play Console's sticky Save bar, dialog and wizard buttons). Gated like `click`; MCP guard and skill updated.

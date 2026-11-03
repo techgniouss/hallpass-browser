@@ -6,17 +6,18 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = path.join(ROOT, 'bin', 'hallpass.mjs');
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const bundled = (() => { try { return createRequire(import.meta.url).resolve('agent-browser/package.json'); } catch { return null; } })();
 const hh = () => fs.mkdtempSync(path.join(os.tmpdir(), 'hp-setup-'));
+const abUrl = pathToFileURL(path.join(ROOT, 'src', 'ab.mjs')).href; // a bare C:/ path is not a valid ESM specifier on Windows
 const node = (args, env = {}) => spawnSync(process.execPath, args, { encoding: 'utf8', env: { ...process.env, HALLPASS_HOME: hh(), HALLPASS_NO_UI: '1', HALLPASS_KEYSTORE: 'file', ...env } });
 
 test('package: agent-browser is a dependency on the tested line, installed by npm alongside hallpass', () => {
-  assert.match(pkg.dependencies?.['agent-browser'] || '', /^~0\.39\./, 'pinned to the tested release line');
+  assert.match(pkg.dependencies?.['agent-browser'] || '', /^~0\.41\./, 'pinned to the tested release line');
   assert.equal(pkg.scripts.postinstall, 'node bin/postinstall.mjs');
   assert.ok(fs.existsSync(path.join(ROOT, 'bin', 'postinstall.mjs')) && pkg.files.includes('bin'));
 });
@@ -31,7 +32,7 @@ test('postinstall never fails an install, and can be skipped', () => {
 test('the bundled agent-browser wins over whatever PATH offers', { skip: !bundled && 'npm install has not been run in this checkout' }, () => {
   const evil = fs.mkdtempSync(path.join(os.tmpdir(), 'hp-evil-'));
   fs.writeFileSync(path.join(evil, 'agent-browser'), '#!/bin/sh\necho evil\n', { mode: 0o755 });
-  const r = node(['--input-type=module', '-e', `import { findBinary } from '${path.join(ROOT, 'src', 'ab.mjs').replace(/\\/g, '/')}'; console.log(findBinary())`], { PATH: evil + path.delimiter + path.dirname(process.execPath) });
+  const r = node(['--input-type=module', '-e', `import { findBinary } from '${abUrl}'; console.log(findBinary())`], { PATH: evil + path.delimiter + path.dirname(process.execPath) });
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.trim().startsWith(path.dirname(bundled)), r.stdout);
 });
@@ -51,7 +52,7 @@ test('with auto-install off and nothing to install, setup still reports ready; t
 });
 
 test('an old pin to some other agent-browser is replaced by our own copy; a pin a person chose is respected', { skip: !bundled && 'npm install has not been run in this checkout' }, () => {
-  const probe = (cfg) => { const h = hh(); fs.writeFileSync(path.join(h, 'config.json'), JSON.stringify(cfg)); const r = node(['--input-type=module', '-e', `import { findBinary } from '${path.join(ROOT, 'src', 'ab.mjs').replace(/\\/g, '/')}'; console.log(findBinary())`], { HALLPASS_HOME: h }); assert.equal(r.status, 0, r.stderr); return { out: r.stdout.trim(), cfg: JSON.parse(fs.readFileSync(path.join(h, 'config.json'), 'utf8')) }; };
+  const probe = (cfg) => { const h = hh(); fs.writeFileSync(path.join(h, 'config.json'), JSON.stringify(cfg)); const r = node(['--input-type=module', '-e', `import { findBinary } from '${abUrl}'; console.log(findBinary())`], { HALLPASS_HOME: h }); assert.equal(r.status, 0, r.stderr); return { out: r.stdout.trim(), cfg: JSON.parse(fs.readFileSync(path.join(h, 'config.json'), 'utf8')) }; };
   const old = path.join(os.tmpdir(), 'hp-old-agent-browser'); fs.writeFileSync(old, '#!/bin/sh\necho old\n', { mode: 0o755 });
   const auto = probe({ agentBrowser: old });
   assert.ok(auto.out.startsWith(path.dirname(bundled)), 'replaced: ' + auto.out);
@@ -62,8 +63,8 @@ test('an old pin to some other agent-browser is replaced by our own copy; a pin 
 test('version line comparison: only older minor lines count as outdated', async () => {
   const { olderThanTested } = await import('../src/ab.mjs');
   assert.equal(olderThanTested('0.27.0'), true);
-  assert.equal(olderThanTested('0.38.9'), true);
-  for (const v of ['0.39.0', '0.39.2', '0.40.1', '1.0.0']) assert.equal(olderThanTested(v), false, v);
+  assert.equal(olderThanTested('0.40.9'), true);
+  for (const v of ['0.41.0', '0.41.1', '0.42.0', '1.0.0']) assert.equal(olderThanTested(v), false, v);
   assert.equal(olderThanTested(null), false);
   assert.equal(olderThanTested('weird'), false);
 });

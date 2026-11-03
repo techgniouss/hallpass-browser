@@ -22,7 +22,7 @@ const pin = (p, { human = false } = {}) => { try { fs.writeFileSync(cfgFile(), J
 export const pinnedByHuman = () => readCfg().agentBrowserPinnedBy === 'person';
 
 // The agent-browser release line this version of hallpass was developed and tested against. Newer lines may change CLI output.
-export const TESTED_AGENT_BROWSER = '0.39';
+export const TESTED_AGENT_BROWSER = '0.41';
 
 let binCache;
 export function findBinary({ repin = false, human = false } = {}) {
