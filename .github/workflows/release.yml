@@ -1,16 +1,18 @@
-# NOTE: written but never executed by the author. Publishing needs an NPM_TOKEN secret and a maintainer's decision.
-# Pushing a tag like v1.3.0 runs the unit tests and publishes to npm WITH provenance (signed build attestation).
+# Pushing a tag like v1.5.1 runs the unit tests and publishes to npm with provenance (signed build attestation).
+# No NPM_TOKEN: publishing uses npm Trusted Publishing (OIDC). One-time setup on npmjs.com:
+#   package hallpass-browser > Settings > Trusted Publisher > GitHub Actions
+#   organization/user: techgniouss, repository: hallpass-browser, workflow filename: release.yml, environment: npm-publish
 name: release
 on:
   push:
     tags: ['v*']
 permissions:
   contents: read
-  id-token: write        # npm provenance
+  id-token: write        # OIDC token for npm trusted publishing + provenance
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment: npm-publish   # configure required reviewers on this environment so a human approves every release
+    environment: npm-publish   # add required reviewers on this environment so a human approves every release
     env:
       HALLPASS_KEYSTORE: file
       HALLPASS_NO_UI: '1'
@@ -18,9 +20,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, registry-url: 'https://registry.npmjs.org' }
+      - name: Trusted publishing needs npm 11.5.1 or newer
+        run: npm install -g npm@^11.5.1
       - name: Tag matches package version
         run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
+      - name: Already on npm?
+        id: published
+        run: |
+          v=$(node -p "require('./package.json').version")
+          if npm view "hallpass-browser@$v" version >/dev/null 2>&1; then echo "exists=true" >> "$GITHUB_OUTPUT"; echo "hallpass-browser@$v is already published; nothing to do"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
       - run: npm test
+        if: steps.published.outputs.exists != 'true'
       - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        if: steps.published.outputs.exists != 'true'
