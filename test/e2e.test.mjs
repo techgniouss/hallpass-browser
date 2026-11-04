@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startSite } from './mock-site.mjs';
 import { makeFakeClis } from './fake-clis.mjs';
+import { abSession } from '../src/ab.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'hp-e2e-'));
@@ -51,7 +52,7 @@ async function ab(session, args, { headed = false } = {}) {
   // like hallpass itself, and like `hallpass do`: without --profile agent-browser attaches to a blank tab, not the page the person sees
   // and with the same launch settings: newer agent-browser releases treat a different HEADED/IDLE setting as a different browser
   const env = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '7200000', ...process.env, AGENT_BROWSER_HEADED: headed ? 'true' : 'false' };
-  const r = await run('agent-browser', ['--session', session, '--profile', path.join(HOME, 'profiles', session.slice(3)), '--json', ...args], { shell: process.platform === 'win32', env });
+  const r = await run('agent-browser', ['--session', abSession(session), '--profile', path.join(HOME, 'profiles', session.slice(3)), '--json', ...args], { shell: process.platform === 'win32', env });
   return { ok: r.code === 0, out: r.out };
 }
 async function add(name, scenario, { password = PASSWORD, withTotp = false, extra = [] } = {}) {
