@@ -13,7 +13,7 @@ jobs:
       HALLPASS_NO_UI: '1'               # no desktop dialogs/notifications in CI; approvals fail closed
       HALLPASS_SKIP_DIALOG_TEST: '1'    # the native-dialog test needs an interactive desktop
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Linux/macOS runners have no usable OS keyring, so opt in to the file keystore (Windows uses DPAPI)
       - name: File keystore on Linux and macOS
         if: runner.os != 'Windows'
