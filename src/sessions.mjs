@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { Browser } from './ab.mjs';
+import { Browser, abSession } from './ab.mjs';
 import { Redactor } from './redact.mjs';
 import { profilesDir, stateDir } from './paths.mjs';
 import { audit } from './audit.mjs';
@@ -40,7 +40,7 @@ export function listSessions() {
   return fs.readdirSync(profilesDir(), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => {
     const t = lastUsed(e.name);
     return {
-      name: e.name, kind: e.name.startsWith('site-') ? 'saved-login-site' : 'credential-profile', running: running.has('hp-' + e.name),
+      name: e.name, kind: e.name.startsWith('site-') ? 'saved-login-site' : 'credential-profile', running: running.has(abSession('hp-' + e.name)),
       last_used: t ? new Date(t).toISOString() : null, age_days: t ? Math.floor((Date.now() - t) / 86400e3) : null,
       size_mb: Math.round(dirSize(path.join(profilesDir(), e.name)) / 1e5) / 10,
     };

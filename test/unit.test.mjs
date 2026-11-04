@@ -171,3 +171,13 @@ test('policy: expiry parsing', () => {
   assert.equal(policy.parseExpiry('2027-03-04', now), '2027-03-04T00:00:00.000Z');
   assert.equal(policy.parseExpiry('soon', now), null);
 });
+
+test('session names reach agent-browser without dots (0.41+ rejects "hp-site-example.com"); hallpass keeps the dotted name', async () => {
+  const { Browser, abSession } = await import('../src/ab.mjs');
+  assert.equal(abSession('hp-site-example.com'), 'hp-site-example_com');
+  assert.equal(abSession('hp-supabase'), 'hp-supabase');
+  const b = new Browser({ session: 'hp-site-play.google.com', profile: '/tmp/p', redactor: { scrub: (s) => s } });
+  const f = b._flags();
+  assert.equal(f[f.indexOf('--session') + 1], 'hp-site-play_google_com');
+  assert.equal(b.session, 'hp-site-play.google.com', 'the name the agent sees is unchanged');
+});

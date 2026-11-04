@@ -125,13 +125,16 @@ export function signInManually(profile, url, { timeoutMs = 15 * 60_000 } = {}) {
   });
 }
 
+/** agent-browser 0.41+ only accepts [A-Za-z0-9_-] in a session name, but hallpass names sites after their host ("hp-site-example.com"). Dots become "_" on the way in; hallpass keeps using the dotted name everywhere else. */
+export const abSession = (s) => String(s).replace(/\./g, '_');
+
 export class Browser {
   constructor({ session, profile, headed = false, redactor, allowedDomains = null }) {
     Object.assign(this, { session, profile, headed, redactor, allowedDomains });
   }
 
   _flags(json = true) {
-    const f = ['--session', this.session, '--profile', this.profile];
+    const f = ['--session', abSession(this.session), '--profile', this.profile];
     if (json) f.push('--json');
     if (this.headed) f.push('--headed');
     if (this.allowedDomains?.length) f.push('--allowed-domains', this.allowedDomains.join(','));
@@ -211,6 +214,6 @@ export class Browser {
   alive() {
     // bare: no --session flag, because with one the listing marks the current session as "-> name"
     const r = this.run(['session', 'list'], { timeout: 15_000, bare: true });
-    return r.ok && Array.isArray(r.json?.data?.sessions) && r.json.data.sessions.includes(this.session);
+    return r.ok && Array.isArray(r.json?.data?.sessions) && r.json.data.sessions.includes(abSession(this.session));
   }
 }

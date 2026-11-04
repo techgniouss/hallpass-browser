@@ -1,6 +1,6 @@
 {
   "name": "hallpass-browser",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Open any website in a browser your AI agent can drive and log in safely: credentials the agent can use but never read, with a hand-off to you for CAPTCHA/MFA. CLI, MCP server, and plugins for Claude Code, Codex, Gemini CLI and Antigravity.",
   "keywords": [
     "ai-agent",

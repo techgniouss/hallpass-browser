@@ -17,7 +17,7 @@ import { startBackgroundSetup } from './setup.mjs';
 export { guardBrowser };
 import { profilesDir } from './paths.mjs';
 
-const VERSION = '1.5.0';
+const VERSION = '1.5.1';
 
 export const INSTRUCTIONS = `hallpass opens websites in a browser you can drive, and handles login safely.
 

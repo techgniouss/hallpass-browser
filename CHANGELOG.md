@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.1 (fix: opening any site with a dot in its host)
+
+Fixed
+- **`hallpass open https://example.com` failed on agent-browser 0.41.x** with `Invalid session name 'hp-site-example.com'`: 0.41 only accepts letters, digits, `-` and `_` in a session name, and hallpass named sessions after the host. Dots are now mapped to `_` when talking to agent-browser (the name the agent sees is unchanged). Found by installing 1.5.0 from the registry into a clean folder; the test suites only used `localhost`, which has no dot. A regression test now covers it. **1.5.0 is affected: upgrade.**
+
 ## 1.5.0 (activate, temp-folder uploads, click retry)
 
 Changed
