@@ -1,0 +1,9 @@
+# Security-critical code and the release pipeline always need the maintainer's review.
+# (Enable "Require review from Code Owners" in the main branch ruleset to enforce this.)
+*                          @techgniouss
+/src/                      @techgniouss
+/bin/                      @techgniouss
+/.github/                  @techgniouss
+/SECURITY.md               @techgniouss
+/package.json              @techgniouss
+/package-lock.json         @techgniouss

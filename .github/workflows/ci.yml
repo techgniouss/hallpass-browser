@@ -1,6 +1,10 @@
-# NOTE: written but never executed by the author (no CI runner was available while building). First run may need tweaks.
 name: ci
 on: [push, pull_request]
+permissions:
+  contents: read          # tests need nothing more; a fork PR can never write to the repository
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
