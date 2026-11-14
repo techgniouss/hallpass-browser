@@ -59,7 +59,7 @@ Status reflects the code as it is today; nothing here is claimed to exist unless
 | 15 | Credential policy, read-only | **done** |
 | 16 | Session hygiene | **done** (`sessions`, `prune`) |
 | 17 | Encrypted export/import | **done** |
-| 18 | Packaging | **done** except publishing: npm package `hallpass-browser`, LICENSE, CONTRIBUTING, CODE_OF_CONDUCT, security reporting, templates, Dependabot, release workflow (unrun); native packages for Claude Code, Codex, Gemini CLI, Antigravity. **npm publish and single-file binaries intentionally not done** |
+| 18 | Packaging | **done** except single-file binaries: published to npm as `hallpass-browser` (tag-triggered release workflow with provenance), LICENSE, CONTRIBUTING, CODE_OF_CONDUCT, security reporting, templates, Dependabot, CodeQL; native packages for Claude Code, Codex, Gemini CLI, Antigravity. **Single-file binaries intentionally not done** |
 | 19 | Detection corpus | **done** (28 fixtures) |
 | 20 | init wizard | **done** (CLI; no UI) |
 

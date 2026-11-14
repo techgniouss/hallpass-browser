@@ -35,6 +35,12 @@ Node 20+. On Linux/macOS CI runners without an OS keyring set `HALLPASS_KEYSTORE
 - Keep `package.json`, `.claude-plugin/plugin.json`, `gemini-extension.json`, `.codex-plugin/plugin.json` and `src/mcp.mjs` on the same version (a test enforces it).
 - Run `npm test` and `npm run test:browser` and paste the summary.
 
+What to expect:
+- `main` is protected. Changes arrive through a pull request that needs one approval, a Code Owner review (see `.github/CODEOWNERS`) and green CI (`test` on Linux, Windows and macOS). Review comments must be resolved before merging.
+- CI on a pull request from an outside contributor starts only after a maintainer approves it.
+- Workflow actions are pinned to full commit SHAs (a repository rule). Don't change a `uses:` line to a tag; Dependabot proposes the SHA updates.
+- Releases are cut by the maintainer: a `vX.Y.Z` tag runs the release workflow, which a maintainer approves before it publishes to npm with provenance. Contributors never publish.
+
 ## Reporting security issues
 
 **Do not open a public issue.** See [SECURITY.md](SECURITY.md).
