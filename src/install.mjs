@@ -15,7 +15,7 @@ const stripFrontmatter = (t) => t.replace(/^---[\s\S]*?\n---\n/, '');
 const MCP_NOTE = `
 ## If hallpass is available as MCP tools
 
-Use the tools instead of the shell commands above: \`hallpass_open\` (= \`hallpass open\`), \`hallpass_resume\`, \`hallpass_status\`, \`hallpass_logout\`, \`hallpass_list\`, and \`hallpass_request_credential\` (= \`hallpass request\`: the user types a login into a form, you never see it), then drive the page with the \`browser\` tool (\`command\` is the argv array you would pass to \`agent-browser --session <session>\`; risky clicks are confirmed by the user) and \`browser_screenshot\`. The rules above apply unchanged.
+Use the tools instead of the shell commands above: \`hallpass_open\` (= \`hallpass open\`), \`hallpass_resume\`, \`hallpass_status\`, \`hallpass_logout\`, \`hallpass_list\`, \`hallpass_access\` (read-only: which confirmation dialogs the user has switched off), \`hallpass_accounts\` (=\`hallpass accounts\`: every login for a site; when there is more than one, ask the user which and pass it as \`as\`), and \`hallpass_request_credential\` (= \`hallpass request\`: the user types a login into a form, you never see it), then drive the page with the \`browser\` tool (\`command\` is the argv array you would pass to \`agent-browser --session <session>\`; risky clicks are confirmed by the user) and \`browser_screenshot\`. The rules above apply unchanged.
 `;
 
 export function instructionBody() {

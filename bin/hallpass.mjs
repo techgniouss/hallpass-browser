@@ -12,7 +12,7 @@ import { backend, masterKey } from '../src/keystore.mjs';
 import { normalizeAllowed, parseOrigin } from '../src/origin.mjs';
 import { parseTotpInput, base32Decode } from '../src/totp.mjs';
 import { isTTY, ask, askHidden, readAllStdin } from '../src/prompt.mjs';
-import { login, openSite, resume, status, logout, clearState } from '../src/login.mjs';
+import { login, openSite, resume, status, logout, clearState, nameLogin } from '../src/login.mjs';
 import { findBinary, TESTED_AGENT_BROWSER } from '../src/ab.mjs';
 import { home } from '../src/paths.mjs';
 import { install, mcpConfig, TARGETS, MCP_TARGETS } from '../src/install.mjs';
@@ -22,6 +22,9 @@ import { startCredentialRequest, describeRequest } from '../src/request.mjs';
 import { runBrowser } from '../src/act.mjs';
 import { exportVault, importVault } from '../src/portable.mjs';
 import { listSessions, pruneSessions } from '../src/sessions.mjs';
+import { accountsFor, allAccounts, cleanLabel } from '../src/accounts.mjs';
+import { status as updateStatus, checkNow, runUpdate } from '../src/update.mjs';
+import { getAccess, setAccess, clearAccess, describeAccess, parseDuration, normalizeSite, DEFAULT_FULL_TTL } from '../src/access.mjs';
 import { parseRef, resolveRef, SecretUnavailable } from '../src/refs.mjs';
 import { serve } from '../src/mcp.mjs';
 import { setup, inspect as inspectRuntime, withLock, recordFailure } from '../src/setup.mjs';
@@ -44,12 +47,27 @@ const HELP = `hallpass - agent logins with credentials the agent can use but not
     hallpass init [--yes]                   detect your AI tools and set them up
     hallpass log [--tail n] [--verify]     what agents did with your logins (hash-chained, no secrets)
     hallpass unlock <name>                  re-enable auto-login after a rejected password
+    hallpass access trusted <site>... [--for 30d] [--include-credentials]
+                                            stop asking before risky clicks and uploads on these sites only
+    hallpass access full [--for 4h | --forever] [--include-credentials]
+                                            stop asking everywhere (expires after 4h unless you say otherwise)
+    hallpass access ask                     back to asking (the default).  hallpass access  shows the current level
 
   The agent runs these:
-    hallpass open <url> [--headed|--headless] [--as <name>]
+    hallpass open <url> [--headed|--visible|--headless] [--as <name>] [--new]
                                             open ANY site. Stored credential for its origin -> headless login.
                                             None -> headless on a saved profile; if a login wall appears, a visible
-                                            window opens and the person logs in. --headed forces person-logs-in mode.
+                                            window opens and the person logs in. --headed: visible window, the person logs in
+                                            (nothing typed for them). --visible: visible window too, but a stored credential
+                                            is still typed automatically (watch the agent work). --headless: never a window.
+                                            The person can fix this for everything with HALLPASS_WINDOW=visible|headless.
+                                            Several accounts for one site: without --as it stops with
+                                            "ambiguous_account" (ask the person which). --as takes a stored credential's
+                                            name, or the label of a saved browser login, or "default" for the site's unlabelled
+                                            login. To ADD an account, give a new label and --new (a mistyped name is an error).
+    hallpass accounts [<url>]                every login hallpass has for a site (stored credentials AND saved browser
+                                            logins), or for all sites without a URL. Use it when a site has several accounts.
+    hallpass name-login <url> <name>         give a site's earlier, unnamed saved login a name (then --as <name>)
     hallpass list                            names, URLs, approved origins (no secrets)
     hallpass show <name>                     metadata for one entry
     hallpass login <name> [--headed|--headless] [--wait <sec>] [--manual] [--timeout <sec>]
@@ -59,6 +77,7 @@ const HELP = `hallpass - agent logins with credentials the agent can use but not
 
   Setup:
     hallpass setup                           install what hallpass needs (agent-browser and Chrome); automatic on first use, safe to re-run
+    hallpass update [--check]                is there a newer hallpass? In your own terminal it offers to install it (asks first)
     hallpass doctor
     hallpass harden                          print Claude Code deny-rules that fence off the vault
     hallpass install --for <tool>            teach an AI tool how to use hallpass. tool = claude | codex | gemini |
@@ -69,6 +88,7 @@ const HELP = `hallpass - agent logins with credentials the agent can use but not
     hallpass install-skill [--dir <path>]    Claude-only shortcut for: install --for claude
 
   add options:
+    --label <text>            a nickname shown when choosing between accounts, e.g. "work" or "Acme Inc (billing)"
     --origin <url>            extra approved origin (repeatable), e.g. https://accounts.google.com or https://*.example.com
     --username-selector / --password-selector / --otp-selector / --submit-selector <css>
     --success-url <glob>      e.g. "https://app.example.com/**"  (strongly recommended)
@@ -104,10 +124,11 @@ switch (cmd) {
       'success-url': { type: 'string' }, 'success-text': { type: 'string' },
       'lock-navigation': { type: 'boolean' }, 'stdin-json': { type: 'boolean' }, force: { type: 'boolean' },
       'require-approval': { type: 'boolean' }, expires: { type: 'string' }, 'max-uses': { type: 'string' },
-      username: { type: 'string' }, 'password-ref': { type: 'string' }, 'totp-ref': { type: 'string' },
+      username: { type: 'string' }, 'password-ref': { type: 'string' }, 'totp-ref': { type: 'string' }, label: { type: 'string' },
     });
     const name = needName(positionals);
     if (!vault.validName(name)) usage('name must be lowercase letters, digits, . _ - (max 63)');
+    if (name === 'default') usage('the name "default" is reserved (it means a site\'s unlabelled saved login)');
     if (!v.url) usage('--url is required (the login page)');
     const loginOrigin = parseOrigin(v.url);
     if (!loginOrigin) usage('--url must be https:// (http:// only for localhost)');
@@ -163,6 +184,7 @@ switch (cmd) {
       selectors, successUrl: v['success-url'] || null, successText: v['success-text'] || null,
       lockNavigation: !!v['lock-navigation'], createdAt: new Date().toISOString(),
       requireApproval: !!v['require-approval'], expiresAt, maxUses,
+      ...(cleanLabel(v.label) ? { label: cleanLabel(v.label) } : {}),
     }, { username, ...(passwordRef ? { passwordRef } : { password }), ...(totpRef ? { totpRef } : {}), ...(totpCfg ? { totp: totpCfg } : {}) }));
     clearState(name); // a fresh credential gets a fresh chance
     resetUses(name); revokeGrant(name);
@@ -172,6 +194,74 @@ switch (cmd) {
     break;
   }
   case 'list': out({ entries: safe(() => vault.list()) }); break;
+  case 'update': {
+    // Looking is open to anyone (--check, or no terminal). Installing is the person's: a real terminal and a typed yes.
+    const { values: v } = opts({ check: { type: 'boolean' } }, false);
+    const res = await checkNow();
+    const s = updateStatus();
+    const info = { current: s.current, latest: s.latest, install: s.install, ...(res.ok ? {} : { check_failed: res.reason }) };
+    if (!s.update_available) { out({ status: res.ok ? 'up_to_date' : 'unknown', ...info }); break; }
+    if (v.check || !isTTY() || !s.install.automatic) {
+      out({ status: 'update_available', ...info, next: s.install.automatic ? 'In your own terminal run: hallpass update' : 'Update with: ' + s.install.command });
+      break;
+    }
+    process.stderr.write(`\nHallpass ${s.latest} is available (you have ${s.current}).\nThis will run: ${s.install.command}\n\n`);
+    if ((await ask('Type yes to update now: ')).trim().toLowerCase() !== 'yes') { out({ status: 'update_available', ...info, next: 'Not updated. Run hallpass update when you are ready.' }); break; }
+    const r = runUpdate();
+    out({ status: r.ok ? 'updated' : 'failed', ...info, ...(r.ok ? { next: 'Restart your AI tool so it starts the new version.' } : { detail: 'npm exited with code ' + r.code + '. Try the command above by hand.' }) }, r.ok ? 0 : 1);
+    break;
+  }
+  case '_update-check': { await checkNow(); process.exit(0); break; } // run detached by the once-a-day refresh; prints nothing
+  case 'access': {
+    // How many confirmation dialogs the PERSON wants. Reading it is open to anyone; loosening it needs a real terminal, like `add`.
+    const { values: v, positionals } = opts({ for: { type: 'string' }, forever: { type: 'boolean' }, 'include-credentials': { type: 'boolean' } });
+    const [level, ...sites] = positionals;
+    if (!level || level === 'status') { out(describeAccess()); break; }
+    if (level === 'ask' || level === 'off' || level === 'reset') { out(describeAccess(safe(() => clearAccess()))); break; } // tightening is always allowed
+    if (level !== 'trusted' && level !== 'full') usage('usage: hallpass access [ask | trusted <site>... | full] [--for 4h|--forever] [--include-credentials]');
+    if (!isTTY()) usage('hallpass access ' + level + ' needs a real terminal: it removes confirmation dialogs, so a person must choose it (an agent cannot).');
+    if (v.for && v.forever) usage('choose --for <duration> or --forever, not both');
+    let ttlMs = null;
+    if (v.for) { ttlMs = parseDuration(v.for); if (!ttlMs) usage('--for must look like 90m, 4h, 30d or 2w'); }
+    else if (!v.forever && level === 'full') ttlMs = parseDuration(DEFAULT_FULL_TTL);
+    if (level === 'full' && sites.length) usage('full applies to every site; use "trusted <site>..." to limit it');
+    if (level === 'trusted') {
+      if (!sites.length) usage('usage: hallpass access trusted <site>...   e.g. hallpass access trusted play.google.com "*.supabase.com"');
+      for (const s of sites) if (!normalizeSite(s)) usage('not a valid site: ' + s + ' (use a hostname like play.google.com, or *.example.com)');
+    }
+    const include = !!v['include-credentials'];
+    const where = level === 'full' ? 'EVERY site' : sites.map(normalizeSite).join(', ');
+    process.stderr.write(`\nThis turns off the confirmation dialogs for risky clicks (publish, delete, pay, submit...) and file uploads on ${where}\n` +
+      `${include ? 'It ALSO skips the approval dialog of stored logins that ask for one.' : 'Stored logins saved with --require-approval will still ask.'}\n` +
+      `Lasts: ${ttlMs ? v.for || DEFAULT_FULL_TTL : 'until you run: hallpass access ask'}.\nSecrets stay unreadable, logins stay pinned to their sites, and every skipped dialog is recorded in: hallpass log\n\n`);
+    if ((await ask('Type yes to continue: ')).trim().toLowerCase() !== 'yes') usage('cancelled');
+    out({ status: 'set', ...describeAccess(safe(() => setAccess({ level, sites, ttlMs, includeCredentials: include }))) });
+    break;
+  }
+  case 'name-login': {
+    const { positionals } = opts({});
+    if (positionals.length !== 2) usage('usage: hallpass name-login <url> <name>');
+    let u = positionals[0];
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(u.trim())) u = (/^(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?(\/|$)/i.test(u.trim()) ? 'http://' : 'https://') + u.trim();
+    const r = safe(() => nameLogin(u, positionals[1]));
+    out(r, r.status === 'renamed' ? 0 : 1);
+    break;
+  }
+  case 'accounts': {
+    // Read-only and secret-free: stored credentials by name/masked user/label, and saved browser logins by label.
+    const { positionals } = opts({});
+    if (!positionals[0]) { out({ sites: safe(() => allAccounts()) }); break; }
+    let url = positionals[0];
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url.trim())) url = (/^(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?(\/|$)/i.test(url.trim()) ? 'http://' : 'https://') + url.trim();
+    if (!parseOrigin(url)) usage('URL must be https:// (http:// only for localhost)');
+    const r = safe(() => accountsFor(url));
+    out({
+      origin: r.origin, accounts: r.accounts, needs_choice: r.needs_choice,
+      choose: r.needs_choice ? 'Several logins are available: ask the user which one, then: hallpass open <url> --as <as>' : undefined,
+      add_account: 'To add another account on this site without storing a password, run: hallpass open <url> --as <new-label> (the user signs in in the window).',
+    });
+    break;
+  }
   case 'show': { const { positionals } = opts({}); out({ name: positionals[0], ...safe(() => vault.meta(needName(positionals))) }); break; }
   case 'remove': {
     const { positionals } = opts({});
@@ -191,10 +281,11 @@ switch (cmd) {
     break;
   }
   case 'open': {
-    const { values: v, positionals } = opts({ headed: { type: 'boolean' }, headless: { type: 'boolean' }, as: { type: 'string' }, wait: { type: 'string' }, timeout: { type: 'string' } });
-    if (!positionals[0]) usage('usage: hallpass open <url> [--headed|--headless] [--as <credential>]');
-    if (v.headed && v.headless) usage('choose --headed or --headless, not both');
-    exitFor(await openSite(positionals[0], { mode: v.headed ? 'headed' : v.headless ? 'headless' : 'auto', as: v.as, wait: v.wait && Number(v.wait), timeout: v.timeout && Number(v.timeout) }).catch((e) => ({ status: 'failed', reason: 'error', detail: e.message })));
+    const { values: v, positionals } = opts({ headed: { type: 'boolean' }, headless: { type: 'boolean' }, visible: { type: 'boolean' }, new: { type: 'boolean' }, as: { type: 'string' }, wait: { type: 'string' }, timeout: { type: 'string' } });
+    if (!positionals[0]) usage('usage: hallpass open <url> [--headed|--visible|--headless] [--as <credential-name | label | default>] [--new]');
+    if ([v.headed, v.headless, v.visible].filter(Boolean).length > 1) usage('choose one of --headed, --visible, --headless');
+    if (v.new && !v.as) usage('--new needs --as <label>: the name of the account to add');
+    exitFor(await openSite(positionals[0], { mode: v.headed ? 'headed' : v.visible ? 'visible' : v.headless ? 'headless' : 'auto', as: v.as, create: !!v.new, wait: v.wait && Number(v.wait), timeout: v.timeout && Number(v.timeout) }).catch((e) => ({ status: 'failed', reason: 'error', detail: e.message })));
     break;
   }
   case 'resume': {
@@ -303,6 +394,15 @@ switch (cmd) {
     // env vars that weaken a safety control for whoever sets them (an agent can set them on its own command line)
     const weak = [['HALLPASS_GATE', 'off', 'irreversible-action gate disabled'], ['HALLPASS_UPLOAD', 'allow', 'file uploads no longer need your approval (files are still vetted)'], ['HALLPASS_NO_UI', '1', 'no dialogs: approvals deny, notifications off'], ['HALLPASS_KEYSTORE', 'file', 'master key kept in a file, not the OS keystore']].filter(([k, v]) => process.env[k] === v);
     add('environment', true, weak.length ? 'NOTE: ' + weak.map(([k, v, why]) => `${k}=${v} (${why})`).join('; ') : 'no safety-relevant overrides set');
+    { const u = updateStatus(); add('version', true, u.update_available ? `NOTE: ${u.current}; ${u.latest} is available. Run: hallpass update (${u.install.method})` : u.latest ? `${u.current} (latest published: ${u.latest})` : `${u.current} (update check ${u.check_enabled ? 'has not run yet' : 'is off'})`); }
+    { const a = getAccess(); const d = describeAccess(a);
+      add('access level', true, a.level === 'ask' ? 'ask (every confirmation applies)' + (d.note ? ' - ' + d.note : '')
+        : `NOTE: ${a.level}: confirmation dialogs are skipped on ${a.level === 'full' ? 'every site' : a.sites.join(', ')}${a.includeCredentials ? ', including stored-login approvals' : ''}; ${a.expiresAt ? 'expires in ' + d.expires_in : 'does not expire'}. Undo: hallpass access ask`); }
+    // instruction files installed by an older release do not know about several accounts: agents would not ask which one
+    { const h = process.env.HALLPASS_TARGET_HOME || os.homedir();
+      const files = [['claude', '.claude/skills/hallpass/SKILL.md'], ['codex', '.codex/AGENTS.md'], ['gemini', '.gemini/GEMINI.md'], ['antigravity', '.gemini/config/skills/hallpass/SKILL.md']];
+      const stale = files.filter(([, rel]) => { try { const t = fs.readFileSync(path.join(h, rel), 'utf8'); return /hallpass/i.test(t) && !t.includes('ambiguous_account'); } catch { return false; } }).map(([t]) => t);
+      add('agent instructions', true, stale.length ? 'NOTE: out of date for several accounts (' + stale.join(', ') + '). Run: ' + stale.map((t) => 'hallpass install --for ' + t).join(' ; ') + '  (plugin installs update on their own)' : 'up to date (or not installed at user level)'); }
     out({ status: checks.every((c) => c.ok) ? 'ok' : 'problems', checks }, checks.every((c) => c.ok) ? 0 : 1);
     break;
   }
@@ -312,7 +412,7 @@ switch (cmd) {
       note: 'Merge into ~/.claude/settings.json. Best-effort fence: stops the agent from casually opening the vault. The real guarantee is that hallpass has no command that prints a secret.',
       permissions: { deny: [
         `Read(${h}/**)`, `Edit(${h}/**)`, `Write(${h}/**)`, 'Read(~/.hallpass/**)', 'Edit(~/.hallpass/**)',
-        'Bash(hallpass add:*)', 'Bash(*ProtectedData*)', 'Bash(*master.key*)', 'Bash(*.hallpass*)',
+        'Bash(hallpass add:*)', 'Bash(hallpass access full:*)', 'Bash(hallpass access trusted:*)', 'Bash(*access.json*)', 'Bash(*ProtectedData*)', 'Bash(*master.key*)', 'Bash(*.hallpass*)',
         'Bash(*find-generic-password*)', 'Bash(*secret-tool*)',
       ] },
     });

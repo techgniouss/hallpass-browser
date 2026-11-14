@@ -63,7 +63,9 @@ No credential was ever given to the agent. The browser profile keeps the session
 | 🎯 **Origin pinning** | A password is only ever typed into the exact origin you approved. A look-alike page gets nothing. |
 | 🙋 **Human hand-off** | CAPTCHA, push-approval MFA, passkeys and first logins open a **visible window for you**. Hallpass never fights a CAPTCHA and never types for you. |
 | 🔑 **Automatic TOTP** | Authenticator codes are generated on the fly, never shown. |
-| 🛑 **Irreversible-action gate** | Delete / Publish / Pay / Submit-type clicks need a native confirmation from you, not the model. |
+| 🛑 **Irreversible-action gate** | Delete / Publish / Pay / Submit-type clicks need a native confirmation from you, not the model. Turn the dialogs down per site (`trusted`) or everywhere (`full`) when you want less friction, from your own terminal only. |
+| 👥 **Several accounts per site** | Two Google logins on Play Console, personal and work GitHub: each is separate, and the agent asks you which one instead of guessing. |
+| 👀 **Watch mode** | `--visible` shows the browser while the agent works, and still signs in for you. |
 | 🧾 **Tamper-evident audit log** | Hash-chained record of what agents did. No secrets in it. `hallpass log --verify` |
 | 🧹 **Output redaction** | Secrets are scrubbed from what flows back to the model; password fields refuse to be read. |
 | 🔌 **Works everywhere** | A CLI that prints JSON, an MCP server, and native plugins for Claude Code, Codex and Gemini CLI. |
@@ -123,13 +125,65 @@ hallpass open https://play.google.com/console      # the agent runs this; deep l
 | Login wall, no stored credential | a visible Chrome window opens; **you** log in (MFA, CAPTCHA, passkey, anything); tell the agent; it runs `hallpass resume`. Hallpass never types for you. The profile keeps the session. |
 | A stored credential matches the site | logs in headless, typing the password without ever showing it (TOTP included) |
 
-Flags: `--headed` (you always log in), `--headless` (never open a window), `--as <name>` (pick the account when several match; Hallpass refuses to guess).
+### Watching the browser (window mode)
+
+Say *"do it in a visible window"* or *"let me watch"* and the agent uses `--visible`. You can switch an open account between modes at any time.
+
+| Flag (MCP `mode`) | Window | Who signs in |
+|---|---|---|
+| *(none)* `auto` | headless; a visible window opens only when you must act (login wall, CAPTCHA, MFA) | stored login, or you |
+| `--visible` | **visible all the way**, so you can watch the agent work | stored login is typed for you; you act only if asked |
+| `--headed` | visible | **you** (nothing is typed, even if a login is stored) |
+| `--headless` | never | stored login; a login wall is just reported |
+
+To make it a rule for everything, set `HALLPASS_WINDOW=visible` (or `headless`) in your MCP client's environment. An agent cannot override it.
+
+### Several accounts on one site
+
+Play Console with two Google logins, GitHub personal and work, two Supabase organisations: each login is kept separate, and **Hallpass never guesses between them**.
+
+| You want | Do this |
+|---|---|
+| See what exists for a site | `hallpass accounts https://play.google.com/console` (MCP: `hallpass_accounts`). Lists stored credentials (name, masked user, nickname, locked or expired?) and saved browser logins (label, last used). Never a secret. `hallpass accounts` alone lists every site. |
+| Use a specific one | `hallpass open <url> --as <name>` (MCP: `as`). `<name>` is a stored credential's name, or the label of a saved browser login. |
+| Add a second account **without storing a password** | `hallpass open <url> --as work --new`: starts a new, empty saved login; you sign in once in the window, and `--as work` is instant afterwards. `--new` is required so a mistyped name is an error, not a surprise new account. Accounts are separate browser profiles, so they never leak into each other. |
+| Add a second **hands-free** account | `hallpass add play-alt --url <login-url> --label "Alt developer account"`, or let the agent run `hallpass request <login-url> --name play-alt` (without `--name`, a free name such as `play-google-com-2` is chosen and you can type a nickname in the form). |
+| The login you already had | nothing to migrate: it keeps working, and it is `--as default`. While it is the only login for a site, `open` uses it exactly as before. Once the site has a second account, Hallpass lists it as an "earlier saved login with no name yet" and the agent asks you whose it is. Name it once with `hallpass name-login <url> <name>` (MCP: `hallpass_name_login`); your saved session moves with it, no sign-in needed. |
+
+If a site has more than one login and the agent does not say which, `open` stops with `reason: "ambiguous_account"` and the list of choices, and the agent must **ask you**. In an MCP client that supports *elicitation* (a native picker), Hallpass shows you the choice directly. Any other agent (Claude Code, Codex, Gemini CLI, Cursor, ...) is told by its instructions to ask you in chat and then repeat the call with `--as <your choice>`. The same flow works from a plain shell.
+
+**Upgrading from an earlier release:** stored credentials, saved sessions and the audit log are read as they are; there is no conversion step. After upgrading, run `hallpass doctor`: it tells you if the instruction files an earlier `hallpass install` wrote (Codex, Gemini, the Claude skill) need `hallpass install --for <tool>` again, so your agent knows how to ask which account. Plugin installs update on their own.
+
+### How much it asks you (access levels)
+
+By default Hallpass asks you before anything risky: a native dialog for Delete / Publish / Pay / Submit-type clicks, for file uploads, and for stored logins you marked "ask each time". That is the right default. When you are doing a lot of trusted work, you can turn the dialogs down, **from your own terminal only** (an agent cannot):
+
+| Level | What changes | Command |
+|---|---|---|
+| `ask` (default) | every confirmation applies | `hallpass access ask` |
+| `trusted` | no click or upload dialogs **on the sites you list**; everything else still asks. This is the one most people want. | `hallpass access trusted play.google.com "*.supabase.com"` |
+| `full` | no click or upload dialogs anywhere. Expires after **4 hours** unless you choose a time (`--for 8h`) or `--forever`. | `hallpass access full` |
+
+Add `--include-credentials` to also skip the approval dialog of stored logins that ask each time (they keep asking otherwise: you chose that for that specific login). `hallpass access` shows what is on and when it ends; `hallpass doctor` flags it; results to the agent carry `"access": "trusted"` so nothing is hidden; every skipped dialog is recorded in `hallpass log`.
+
+**Never switched off by any level:** secrets stay unreadable and redacted; a login is typed only on its pinned origin; `eval`, cookies, network and `file://` stay blocked; uploads still refuse private keys, config folders and unknown file types; adding, removing and exporting logins still needs you at a terminal; a rejected password still locks that login; expiry and use limits still apply; CAPTCHAs still come to you; `HALLPASS_READONLY=1` and `HALLPASS_UPLOAD=off` still restrict the agent.
+
+The setting is signed with a key derived from your vault key, so editing the file by hand does nothing, and an expired or damaged one means "ask". Note what it does and does not give you: it removes the pop-ups, which are your main defence against a web page tricking the agent into clicking "Delete account". `trusted` limits that to sites you named; prefer it, and prefer a time limit. See [SECURITY.md](SECURITY.md).
 
 ### Add a credential (optional, for hands-free logins)
 
 - **Let the agent ask, you type:** the agent runs `hallpass request <login-url>` (MCP: `hallpass_request_credential`). A one-time form opens in *your* browser; you type the login; the agent never sees it.
 - **Or in your own terminal:** `hallpass add supabase --url https://supabase.com/dashboard/sign-in --origin "https://*.supabase.com" --success-url "https://supabase.com/dashboard/**"`
 - **From a password manager:** `--password-ref op://Vault/Item/password` (also `bw:<id>`, `pass:<path>`): Hallpass stores a pointer and fetches the secret at login.
+
+### Updates
+
+Hallpass tells you when a newer version is published, and lets you decide.
+
+- About once a day it quietly asks the npm registry for the latest version number (one anonymous request, see the FAQ for exactly what is sent). It never slows a command down: it runs in a background process.
+- When a newer version exists, your agent's next `open` result includes `update_available`, and the agent tells you once and asks whether you want to update. `hallpass doctor` shows it too.
+- **Updating is yours to do, from your own terminal:** `hallpass update` shows what is new and, for a global npm install, asks `Type yes to update now` before running `npm install -g hallpass-browser@latest`. For other installs it prints the right command (Claude Code plugin, Gemini extension, `npx`, a git clone). An agent can look (`hallpass update --check`, MCP `hallpass_version`) but cannot install anything.
+- Restart your AI tool afterwards so it starts the new version. Turn the check off with `HALLPASS_NO_UPDATE_CHECK=1` (it is also off in CI).
 
 ## How it compares
 
@@ -147,19 +201,38 @@ Flags: `--headed` (you always log in), `--headless` (never open a window), `--as
 | Per-use approval | Native dialog (Allow once / 1 hour / Deny), focus defaults to Deny; no desktop = deny | `add --require-approval` (or tick it in the request form) |
 | Credential limits | Expiry and sign-in count | `--expires 30d`, `--max-uses 5` |
 | Lockout protection | After a rejected password, automatic login stops until a person fixes it | always on; `hallpass unlock <name>` / `add --force` |
-| Action gate | Delete / Publish / Pay / Submit-type clicks need a native confirmation | default for the MCP `browser` tool and `hallpass do`; `HALLPASS_GATE=off\|risky\|all` |
+| Action gate | Delete / Publish / Pay / Submit-type clicks need a native confirmation | default for the MCP `browser` tool and `hallpass do`; loosen it deliberately with [access levels](#how-much-it-asks-you-access-levels) |
+| Upload approval | Each file upload is vetted (types, no keys or config folders) and confirmed | default; `HALLPASS_UPLOAD=off` disables uploads |
 | Read-only server | Observation only | `HALLPASS_READONLY=1` in the MCP client config |
-| Audit log | Hash-chained record of what agents did; no secrets | `hallpass log`, `hallpass log --verify` |
+| Several accounts | Never guesses which login to use; saved logins are separate browser profiles | automatic; see [Several accounts](#several-accounts-on-one-site) |
+| Audit log | Hash-chained record of what agents did, including every dialog an access level skipped; no secrets | `hallpass log`, `hallpass log --verify` |
 | Password readback guard | Typed secrets are cleared after typing; the MCP tool refuses to read password fields | always on |
 | Backup / move machines | Passphrase-encrypted export/import | `hallpass export file` / `import file` (terminal only) |
 
 | An agent can | Only a person (real terminal / native dialog) can |
 |---|---|
-| `open`, `resume`, `login`, `status`, `logout`, `sessions`, `prune`, `log` | `add --force` (replace), `remove`, `unlock`, `export`, `import`, `doctor --repin` |
+| `open`, `resume`, `login`, `status`, `logout`, `sessions`, `prune`, `log`, `accounts`, read `access` | `add --force` (replace), `remove`, `unlock`, `export`, `import`, `doctor --repin` |
 | `request` a new login (a person types it into a form), `add` a brand-new one via stdin | register a password-manager reference, approve a sign-in, confirm a risky click |
-| use a stored login (typed for it; never shown) | read a password back |
+| use a stored login (typed for it; never shown), name an unnamed saved login the user told it to | read a password back, **loosen the access level** (`access trusted` / `full`) |
+| turn dialogs back on (`hallpass access ask`) | |
 
 Housekeeping: `hallpass sessions`, `hallpass prune --older-than 30d`, `hallpass init`, `hallpass doctor`. Containers/CI without an OS keyring can opt in to `HALLPASS_KEYSTORE=file` (weaker: protects only against other OS users). Cloud browsers work through agent-browser's own `AGENT_BROWSER_PROVIDER` setting; credentials are still resolved locally.
+
+### Settings reference
+
+| Setting | Where | Meaning |
+|---|---|---|
+| `hallpass access ask \| trusted <site>... \| full` | your terminal | how many confirmation dialogs you want (see above) |
+| `HALLPASS_WINDOW=visible\|headless` | MCP client env | fix the window mode for every open; the agent cannot override it |
+| `HALLPASS_READONLY=1` | MCP client env | the agent can look but not change anything |
+| `HALLPASS_UPLOAD=ask\|allow\|off` | MCP client env | upload dialogs; `off` disables uploads (`allow` is older than access levels: prefer `hallpass access trusted`) |
+| `HALLPASS_GATE=risky\|all\|off` | MCP client env | which clicks count as risky (`off` is older than access levels: prefer `hallpass access`) |
+| `HALLPASS_NO_UI=1` | env | no dialogs at all: every confirmation is denied (CI, servers) |
+| `HALLPASS_NO_ELICIT=1` | env | never show the account picker; the agent asks in chat instead |
+| `HALLPASS_NO_UPDATE_CHECK=1` | env | no daily check for a newer version (also off in CI) |
+| `HALLPASS_HOME`, `HALLPASS_KEYSTORE=file`, `HALLPASS_NO_AUTO_INSTALL=1` | env | data folder, file keystore, no automatic browser install |
+
+> Environment variables are set by whoever launches the command. In an MCP client config that is you. In a plain shell an agent can set them on its own command line, so use them as defaults you control, not as a guarantee against a hostile shell agent. `hallpass doctor` flags the ones that weaken a protection.
 
 ## FAQ
 
@@ -167,9 +240,13 @@ Housekeeping: `hallpass sessions`, `hallpass prune --older-than 30d`, `hallpass 
 
 **Does it solve CAPTCHAs?** No, on purpose. It hands them to you in a visible window.
 
-**Does it send my data anywhere?** No. The vault, profiles and audit log live on your machine. Cloud browsers are opt-in.
+**Does it send my data anywhere?** No. The vault, profiles and audit log live on your machine. Cloud browsers are opt-in. The one network request Hallpass makes by itself is the update check: at most once a day, a plain GET of `https://registry.npmjs.org/hallpass-browser/latest` (the public latest-version number). It sends no identifier, no version, no account or machine information; npm sees what any download sees, your IP address. Turn it off with `HALLPASS_NO_UPDATE_CHECK=1`.
 
 **Do I have to store credentials?** No. The default is that *you* log in once in a visible window and the profile keeps the session.
+
+**Can I stop it asking for confirmation every time?** Yes, deliberately: `hallpass access trusted <site>` turns the click and upload dialogs off on the sites you name, `hallpass access full` everywhere (for 4 hours unless you say otherwise). Only you can do it, from a terminal. The integrity checks (secrets unreadable, origin pinning, blocked commands, upload vetting) never switch off. See [How much it asks you](#how-much-it-asks-you-access-levels).
+
+**I have two accounts on one site. Which one does the agent use?** It asks you which one, then uses `hallpass open <url> --as <name>`. See [Several accounts](#several-accounts-on-one-site).
 
 **Which sites work?** Anything agent-browser can open. Sign-in detection is heuristic (it ships a 28-page corpus in 7 languages), so when it guesses wrong it asks you instead of failing.
 
@@ -192,7 +269,9 @@ Everything runs against local mock sites. The detection corpus is structural re-
 - **agent-browser compatibility:** tested against 0.41.x (0.27.x also needs a Chrome older than about 155: its headed window loses the page on newer Chrome). Other releases may change output formats; `hallpass doctor` tells you which version you have.
 - Logins inside **iframes or shadow DOM** are not auto-filled (the page still reads as a login wall, so a person is asked). Sites needing extra fields (e.g. AWS IAM account ID) need a site recipe (not built, see [ROADMAP](ROADMAP.md)).
 - **Passkeys/WebAuthn** can be used by *you* in the hand-off window, but Hallpass cannot store or replay them. Reading **email/SMS codes** and a **separate-user broker** are not built.
+- **Access levels remove the pop-ups, which are the main defence against a web page that tries to make the agent click "Delete"**. Use `trusted` with named sites and a time limit rather than `full --forever`. Like the rest of the gate they stop a prompt-injected agent, not a hostile process running as you: a shell agent can still call `agent-browser` directly.
 - The **action gate** is a heuristic on labels: it catches common dangerous buttons, not every one, and a shell agent can bypass it by calling `agent-browser` directly.
+- `www.example.com` and `example.com` keep separate saved logins (they always have), and a local dev server on any port shares one saved login per hostname; use labels to tell accounts apart.
 - Vaults are bound to one OS account; move machines with `export` / `import`.
 
 ## Contributing

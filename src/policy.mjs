@@ -12,6 +12,7 @@ import { ask } from './ui.mjs';
 import { audit } from './audit.mjs';
 import { stateDir } from './paths.mjs';
 import { safeUrl } from './origin.mjs';
+import { bypasses, auditBypass } from './access.mjs';
 
 const GRANT_MS = 60 * 60 * 1000;
 const grantFile = (name) => path.join(stateDir(), name + '.grant');
@@ -60,7 +61,10 @@ export function authorizeUse(name, { target, approver = ask, now = Date.now() } 
     audit('policy', { name, decision: 'exhausted' });
     return denied(name, 'credential_exhausted', `The credential "${name}" has reached its limit of ${m.maxUses} sign-ins. The user can reset it with: hallpass add ${name} --force`);
   }
-  if (m.requireApproval && !grantValid(name, now)) {
+  if (m.requireApproval && !grantValid(name, now) && bypasses('signin', { url: target })) {
+    // The person chose `hallpass access ... --include-credentials`, so this login's own approval dialog is waived.
+    auditBypass('signin', { name, target: target && safeUrl(target) });
+  } else if (m.requireApproval && !grantValid(name, now)) {
     const actor = process.env.HALLPASS_ACTOR || 'a command-line agent';
     const choice = approver({
       title: 'Hallpass: approve sign-in',

@@ -6,6 +6,7 @@ import { Browser, abSession } from './ab.mjs';
 import { Redactor } from './redact.mjs';
 import { profilesDir, stateDir } from './paths.mjs';
 import { audit } from './audit.mjs';
+import { parseSiteKey } from './accounts.mjs';
 
 function dirSize(d, cap = 5e9) {
   let total = 0;
@@ -39,8 +40,10 @@ export function listSessions() {
   const running = runningSessions();
   return fs.readdirSync(profilesDir(), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => {
     const t = lastUsed(e.name);
+    const site = parseSiteKey(e.name);
     return {
-      name: e.name, kind: e.name.startsWith('site-') ? 'saved-login-site' : 'credential-profile', running: running.has(abSession('hp-' + e.name)),
+      name: e.name, kind: site ? 'saved-login-site' : 'credential-profile', running: running.has(abSession('hp-' + e.name)),
+      ...(site ? { host: site.hostKey.slice('site-'.length), account: site.label || 'default' } : {}),
       last_used: t ? new Date(t).toISOString() : null, age_days: t ? Math.floor((Date.now() - t) / 86400e3) : null,
       size_mb: Math.round(dirSize(path.join(profilesDir(), e.name)) / 1e5) / 10,
     };

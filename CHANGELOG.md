@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.6.0 (several accounts, watch mode, access levels, update notice)
+
+Added
+- **Update notice.** About once a day Hallpass asks the npm registry for the latest version number (anonymous, background, never blocks; off with `HALLPASS_NO_UPDATE_CHECK=1`, in CI and in tests). When a newer one exists, the next `open` result carries `update_available` (once per new version per day) so the agent asks you whether to update, `doctor` shows it, MCP `hallpass_version` and `hallpass update --check` let an agent look. `hallpass update` installs it only for you: real terminal, typed yes, and the right command for how it was installed (global npm, Claude Code plugin, Gemini extension, npx, git clone). Agents are told not to run it.
+- **Access levels** (`hallpass access`): `ask` (default), `trusted <site>...` (no click/upload dialogs on the sites you list), `full` (everywhere; expires after 4 hours unless `--for` or `--forever`). Person-only (real terminal + typed yes); signed; expired, edited or unverifiable means `ask`. `--include-credentials` also waives the approval dialog of stored logins that ask each time (otherwise they keep asking). Never relaxed: secret redaction, origin pinning, blocked commands, upload vetting, read-only, `HALLPASS_UPLOAD=off`, expiry, use limits, lockouts, CAPTCHA hand-off. Waived dialogs are audited (`allowed-by-access`); `doctor` and every result show an active level; MCP `hallpass_access` lets the agent read (not change) it; `harden` fences the setting.
+- **Multiple accounts per website, in both modes.** A site can now have any number of stored credentials *and* any number of saved browser logins (no password stored). `--as <x>` takes a credential name, a label for a saved login (`--as work`; a label hallpass has not seen starts a new, separate profile `site-<host>__work`), or `default` for the unlabelled login that already existed. Nothing changes for sites with a single login.
+- **`hallpass accounts [<url>]`** and MCP **`hallpass_accounts`**: list every login for a site (or all sites): kind, `as` value, masked user, nickname, last used, locked state. Never a secret.
+- **Never guess.** With several logins and no `--as`, `open` returns `ambiguous_account` with `candidates` and a `description` per account (replaces `ambiguous_credential`, which only covered stored credentials). The skill, MCP instructions, Gemini context and every installed rule file tell the agent to ask the user and repeat with `as`. MCP clients that support **elicitation** show the user a native picker instead (`account_chosen_by: "user"`); the answer must be one of the offered accounts. `HALLPASS_NO_ELICIT=1` turns this off.
+- `add --label <text>`: a nickname shown when choosing. `request` / `hallpass_request_credential` accept a `label` (prefilled in the form, editable by the person), and with no `--name` pick the next free name (`play-google-com-2`), so a second account for a site no longer collides.
+- Results include `account` (what to pass as `--as` to return to the same login) and, for a brand-new label, `new_account: true`. `hallpass sessions` shows `host` and `account` for saved logins.
+
+- **Visible-window mode.** `--visible` (MCP `mode: "visible"`) shows the Chrome window so the user can watch, and still types a stored credential; `--headed` keeps its meaning (visible, the person signs in). `HALLPASS_WINDOW=visible|headless`, set by the person in the client's env, fixes the mode for every open and cannot be overridden by an agent. Switching an open account between modes was verified to relaunch the browser correctly.
+- **`--new` to add an account.** A mistyped or invented `--as` is now `no_such_account` (listing the real ones) instead of silently starting a new empty saved login and opening a login window. `--as <label> --new` (MCP `new: true`) is how a second account is added.
+- Expired credentials are flagged in `accounts`; a headless login wall no longer tells the agent to `resume` a window that was never opened.
+
+Upgrading from 1.5.x (no data conversion)
+- Stored credentials, saved sessions (`profiles/site-<host>`), state files and the audit log are read exactly as before; a credential saved by an older release simply has no nickname. A site with one login behaves as it always did.
+- The saved login you made before this release stays the site's `default` login. Once a second account exists it is offered as "earlier saved login, no name yet", and **`hallpass name-login <url> <name>`** (MCP `hallpass_name_login`) names it in place, keeping the session. A credential an older release already called `default` keeps working and stays replaceable; importing an old export that contains a now-reserved name skips that entry instead of aborting the import.
+- `hallpass doctor` now flags instruction files written by an older `hallpass install` that do not know about several accounts, and prints the command to refresh them.
+
+Changed
+- The name `default` is reserved for new credentials (like `site-*`).
+- Tests: `test/accounts.test.mjs` (keys, listing, ambiguity, labels, reserved names, request) and `test/accounts-e2e.test.mjs` (two real Chrome profiles on one host stay separate; MCP elicitation picker, decline and forged answers).
+
 ## 1.5.1 (fix: opening any site with a dot in its host)
 
 Fixed

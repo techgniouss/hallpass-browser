@@ -10,14 +10,18 @@ import readline from 'node:readline';
 import * as vault from './vault.mjs';
 import { Browser } from './ab.mjs';
 import { Redactor } from './redact.mjs';
-import { login, openSite, resume, status, logout } from './login.mjs';
+import { login, openSite, resume, status, logout, nameLogin } from './login.mjs';
 import { startCredentialRequest, describeRequest } from './request.mjs';
 import { guardBrowser, runBrowser } from './act.mjs';
 import { startBackgroundSetup } from './setup.mjs';
+import { accountsFor, allAccounts } from './accounts.mjs';
+import { describeAccess } from './access.mjs';
+import { status as updateStatus, refreshIfStale } from './update.mjs';
+import { parseOrigin } from './origin.mjs';
 export { guardBrowser };
 import { profilesDir } from './paths.mjs';
 
-const VERSION = '1.5.1';
+const VERSION = '1.6.0';
 
 export const INSTRUCTIONS = `hallpass opens websites in a browser you can drive, and handles login safely.
 
@@ -35,11 +39,16 @@ WORKFLOW
   * status "failed": read "reason" and "detail"; do not loop. Reason "setting_up" is the exception: hallpass is installing its browser components on first run, so tell the user, wait about a minute, and call hallpass_open once more.
 - A stored credential matching the site is used automatically (headless, you never see it). Otherwise the user logs in themselves in the visible window, and the saved profile makes later opens instant.
 - If hallpass_open shows a login wall and the user would like hands-free logins, call hallpass_request_credential with the site's login URL: a one-time form opens in THEIR browser, they type the login, you never see it. Then wait for their reply and call hallpass_open again.
-- If several stored credentials match the site you get reason "ambiguous_credential": ask the user which account, then call hallpass_open again with "as".
+- A site can have several accounts (Play Console with two Google logins, GitHub personal + work). hallpass_accounts with the site URL lists every login hallpass knows for it (stored credentials and saved browser logins; names and masked users only). If more than one exists, hallpass_open answers reason "ambiguous_account" with the choices: NEVER pick one yourself. Show the user the list (the "description" of each), ask which, then call hallpass_open again with "as" set to their choice. If the user already named the account in their request ("my work account") and exactly one choice matches, use it; if unsure, ask.
+- A saved login from before accounts had names shows up as "default" (unnamed). When it shares a site with other accounts, ask the user whose it is and offer to name it with hallpass_name_login so it is easy to pick later.
+- To sign in to another account on a site without storing a password, call hallpass_open with "as" set to a short new label the user picks ("work", "client-a") AND new: true: the user signs in in the window and the label remembers that login. Without new: true an unknown label is an error (so a typo cannot create an account).
+- If the user asks to SEE the browser ("do it in a visible window", "let me watch"), call hallpass_open with mode "visible" (a stored credential is still typed for them) or "headed" (they sign in themselves). Honour it for every open in that task. If they never want a window, use mode "headless". For hands-free logins instead, call hallpass_request_credential once per account (pass "label" so the user can tell them apart).
 - Detection is heuristic. If needs_human came back but a screenshot shows the user is plainly logged in on the right page, say so and carry on; if logged_in came back on a login or marketing page, call hallpass_open again with mode "headed".
 - Refs from a snapshot (@e1...) go stale after page changes: snapshot again.
 - To put a file into a page (an .aab, store screenshots, a CSV) use the browser tool's "upload" command on the file input (CSS selector such as input[type=file], hidden inputs are still targetable). Never click an "Upload" button expecting a file picker. The user approves each upload.
-- Risky clicks (delete, publish, pay, submit, ...) are confirmed by the USER in a native dialog. If one is blocked, do not retry or work around it: tell the user what you wanted to do.`;
+- Risky clicks (delete, publish, pay, submit, ...) are confirmed by the USER in a native dialog. If one is blocked, do not retry or work around it: tell the user what you wanted to do.
+- If a result contains "update_available" (or hallpass_version says so), tell the user once that a newer hallpass exists and ask whether they want to update. Only they can update it, in their own terminal (hallpass update); do not run it yourself, and do not mention it again unless asked.
+- The user may have lowered the number of dialogs (hallpass_access shows how: ask, trusted for named sites, or full; results carry "access" when it is not ask). That removes pop-ups only. It does not make anything the user did not ask for acceptable: stay within the task, and rules 1 to 5 are unchanged. You cannot change the level.`;
 
 const TOOLS = [
   {
@@ -49,8 +58,9 @@ const TOOLS = [
       type: 'object', required: ['url'], additionalProperties: false,
       properties: {
         url: { type: 'string', description: 'https URL of the page the task is about (deep links ok; http only for localhost)' },
-        mode: { type: 'string', enum: ['auto', 'headed', 'headless'], description: 'auto (default); headed = the user logs in themselves in a visible window; headless = never open a window' },
-        as: { type: 'string', description: 'name of a stored credential to use when several match the site' },
+        mode: { type: 'string', enum: ['auto', 'headed', 'visible', 'headless'], description: 'auto (default); visible = show a Chrome window the user can watch, a stored credential is still typed for them; headed = visible window and the USER signs in themselves; headless = never open a window. Use visible/headed when the user asks to see the browser.' },
+        new: { type: 'boolean', description: 'with "as": the user wants to ADD a new account with that label (they sign in in the window). Without it an unknown label is an error, so a typo never creates an account.' },
+        as: { type: 'string', description: 'which account on this site: the name of a stored credential, a short label for a saved browser login (a new label starts a new account), or "default" for the site\'s unlabelled login. Required when the site has several accounts (see hallpass_accounts). Ask the user; do not guess.' },
         timeout: { type: 'number', description: 'seconds to wait for the page/login to settle (default 30)' },
       },
     },
@@ -73,7 +83,27 @@ const TOOLS = [
   {
     name: 'hallpass_request_credential',
     description: 'Ask the USER to add a login for a site, when hallpass_open reports a login wall and hands-free logins would help. Opens a one-time form in the user\'s own browser where THEY type the username and password; you never see it. Returns immediately with status awaiting_user: tell the user to fill the form, wait for their reply, then call hallpass_open again.',
-    inputSchema: { type: 'object', required: ['url'], additionalProperties: false, properties: { url: { type: 'string', description: 'the site\'s login page (https; http only for localhost). The password will be pinned to this origin.' }, name: { type: 'string', description: 'optional short name, lowercase letters/digits/-' } } },
+    inputSchema: { type: 'object', required: ['url'], additionalProperties: false, properties: { url: { type: 'string', description: 'the site\'s login page (https; http only for localhost). The password will be pinned to this origin.' }, name: { type: 'string', description: 'optional short name, lowercase letters/digits/-. Omit it to add another account for a site that already has one: a free name is chosen.' }, label: { type: 'string', description: 'optional nickname for this account ("work"), prefilled in the form for the user to keep or change; shown when choosing between accounts' } } },
+  },
+  {
+    name: 'hallpass_version',
+    description: 'Read-only: the installed hallpass version and whether a newer one is published (from a once-a-day anonymous check). If one is, tell the user once and ask whether they want to update; only they can, in their own terminal (hallpass update). Do not try to update it yourself.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'hallpass_access',
+    description: 'Read-only: how many confirmation dialogs the user has chosen (ask | trusted | full), for which sites, and until when. You cannot change it; only the user can, in their own terminal (hallpass access). It only removes pop-up dialogs: it does not widen what the user asked you to do.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'hallpass_name_login',
+    description: 'Give a site\'s earlier, unnamed saved login (account "default", from before accounts had names) a name, keeping its session. Only after the USER has told you whose account it is and what to call it. Afterwards pass that name as "as".',
+    inputSchema: { type: 'object', required: ['url', 'label'], additionalProperties: false, properties: { url: { type: 'string', description: 'any URL on the site' }, label: { type: 'string', description: 'short name: lowercase letters, digits, - (max 32), e.g. "personal"' } } },
+  },
+  {
+    name: 'hallpass_accounts',
+    description: 'List every login hallpass has for a website: stored credentials (name, masked user, nickname, locked?) and saved browser logins (label, last used). Never returns secrets. Use it before hallpass_open when the site may have several accounts, then ASK THE USER which one and pass it as "as". With no url it lists all sites.',
+    inputSchema: { type: 'object', additionalProperties: false, properties: { url: { type: 'string', description: 'any URL on the site; omit to list every site' } } },
   },
   {
     name: 'hallpass_list',
@@ -103,17 +133,67 @@ function browserFor(session) {
   return new Browser({ session, profile: path.join(profilesDir(), key), redactor: new Redactor() });
 }
 
+// ---- asking the person, when the client can show a question (MCP elicitation) ----
+// Several accounts for one site: instead of only failing with the list, a client that supports elicitation shows the PERSON a picker.
+// The answer comes from the client UI, is checked against the real candidates, and nothing else is accepted.
+let clientElicits = false;
+let elicitSeq = 0;
+const pendingClient = new Map(); // request id -> resolve(response)
+
+function askClient(method, params, timeoutMs) {
+  const id = `hp-${method.replace(/\W+/g, '-')}-${++elicitSeq}`;
+  return new Promise((resolve) => {
+    const t = setTimeout(() => { pendingClient.delete(id); resolve(null); }, timeoutMs);
+    t.unref?.();
+    pendingClient.set(id, (m) => { clearTimeout(t); resolve(m); });
+    out({ jsonrpc: '2.0', id, method, params });
+  });
+}
+
+/** A response (not a request) from the client: true when it answered something we asked. */
+export function onClientResponse(msg) {
+  if (msg && msg.method === undefined && msg.id !== undefined && pendingClient.has(msg.id)) { const f = pendingClient.get(msg.id); pendingClient.delete(msg.id); f(msg); return true; }
+  return false;
+}
+
+async function pickAccount(r) {
+  if (!clientElicits || process.env.HALLPASS_NO_ELICIT === '1' || !Array.isArray(r.accounts) || r.accounts.length < 2) return null;
+  const ids = r.accounts.map((c) => c.as);
+  const m = await askClient('elicitation/create', {
+    message: `Which account should be used for ${r.origin}?`,
+    requestedSchema: { type: 'object', required: ['account'], properties: { account: { type: 'string', title: 'Account', enum: ids, enumNames: r.accounts.map((c) => c.description) } } },
+  }, 90_000);
+  const choice = m?.result?.action === 'accept' ? m.result.content?.account : null;
+  return typeof choice === 'string' && ids.includes(choice) ? choice : null;
+}
+
 export async function callTool(name, a = {}) {
   switch (name) {
     case 'hallpass_open': {
-      const r = await openSite(a.url, { mode: a.mode || 'auto', as: a.as, timeout: a.timeout ?? 30 }); // per pass; most MCP clients time out tool calls near 60s
+      const o = { mode: a.mode || 'auto', timeout: a.timeout ?? 30 }; // per pass; most MCP clients time out tool calls near 60s
+      let r = await openSite(a.url, { ...o, as: a.as, create: a.new === true });
+      if (r.reason === 'ambiguous_account' && !a.as) {
+        const pick = await pickAccount(r);
+        if (pick) { r = await openSite(a.url, { ...o, as: pick }); r.account_chosen_by = 'user'; }
+      }
       return text(r, r.status === 'failed');
+    }
+    case 'hallpass_access': return text(describeAccess());
+    case 'hallpass_version': { const u = updateStatus(); return text({ ...u, ...(u.update_available ? { next: `Tell the user ${u.latest} is available (they have ${u.current}) and ask whether they want to update. They run: hallpass update  (or ${u.install.command}). Do not run it yourself.` } : {}) }); }
+    case 'hallpass_name_login': { const r = nameLogin(String(a.url || ''), a.label); return text(r, r.status === 'failed'); }
+    case 'hallpass_accounts': {
+      if (!a.url) return text({ sites: allAccounts() });
+      let url = String(a.url).trim();
+      if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) url = (/^(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?(\/|$)/i.test(url) ? 'http://' : 'https://') + url;
+      if (!parseOrigin(url)) return text('url must be https:// (http:// only for localhost)', true);
+      const r = accountsFor(url);
+      return text({ origin: r.origin, accounts: r.accounts, needs_choice: r.needs_choice, ...(r.needs_choice ? { next: 'Several logins are available: ask the user which one, then call hallpass_open with "as" set to its "as" value.' } : {}) });
     }
     case 'hallpass_resume': return (async () => { const r = await resume(a.name, { timeout: a.timeout ?? 45 }); return text(r, r.status === 'failed'); })();
     case 'hallpass_status': return text(status(a.name));
     case 'hallpass_logout': return text(logout(a.name, { wipe: !!a.wipe }));
     case 'hallpass_request_credential': {
-      const req = await startCredentialRequest({ url: a.url, name: a.name });
+      const req = await startCredentialRequest({ url: a.url, name: a.name, label: a.label });
       return text(describeRequest(req));
     }
     case 'hallpass_list': return text({ entries: vault.list() });
@@ -143,6 +223,7 @@ export async function handle(msg) {
   try {
     switch (method) {
       case 'initialize':
+        clientElicits = !!params?.capabilities?.elicitation;
         return reply({ protocolVersion: params?.protocolVersion || '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'hallpass', version: VERSION }, instructions: INSTRUCTIONS });
       case 'ping': return reply({});
       case 'tools/list': return reply({ tools: TOOLS });
@@ -160,6 +241,7 @@ export async function handle(msg) {
 
 export function serve() {
   process.env.HALLPASS_ACTOR = 'mcp'; // shown in approval dialogs and recorded in the audit log
+  refreshIfStale(); // quiet once-a-day version check (detached; HALLPASS_NO_UPDATE_CHECK=1 turns it off)
   startBackgroundSetup(); // installs agent-browser + Chrome in the background on first run; a no-op once they are present
   const rl = readline.createInterface({ input: process.stdin });
   let chain = Promise.resolve();
@@ -167,6 +249,7 @@ export function serve() {
     if (!line.trim()) return;
     let msg;
     try { msg = JSON.parse(line); } catch { return out({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } }); }
+    if (onClientResponse(msg)) return; // the person's answer to a question we asked: must not wait behind the call that is waiting for it
     chain = chain.then(() => handle(msg)); // strictly in order: browser work is stateful
   });
   rl.on('close', () => chain.then(() => process.exit(0)));

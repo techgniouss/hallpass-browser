@@ -106,7 +106,7 @@ test('MCP: initialize advertises tools + instructions; no tool can read or write
   assert.match(init.result.instructions, /Never ask the user to paste/);
   const { tools } = (await rpc('tools/list')).result;
   const names = tools.map((t) => t.name);
-  assert.deepEqual(names.sort(), ['browser', 'browser_screenshot', 'hallpass_list', 'hallpass_logout', 'hallpass_open', 'hallpass_request_credential', 'hallpass_resume', 'hallpass_status'].sort());
+  assert.deepEqual(names.sort(), ['browser', 'browser_screenshot', 'hallpass_accounts', 'hallpass_list', 'hallpass_access', 'hallpass_logout', 'hallpass_name_login', 'hallpass_open', 'hallpass_request_credential', 'hallpass_resume', 'hallpass_status', 'hallpass_version'].sort());
   const schemaText = JSON.stringify(tools);
   assert.ok(!/password|secret|totp|reveal|export/i.test(names.join(' ')), 'no secret-handling tool names');
   assert.ok(!/"(password|secret|username|token)"\s*:/.test(schemaText), 'no secret-bearing parameters');

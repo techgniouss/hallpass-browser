@@ -99,6 +99,33 @@ function openSession() {
 const run = (session, command, approver) => runBrowser({ session, command }, approver ? { approver } : undefined);
 const text = (session, sel) => run(session, ['get', 'text', sel]).text;
 
+test('real browser: access levels waive the upload dialog, vetting and HALLPASS_UPLOAD=off still apply', { timeout: 300_000 }, async () => {
+  const A = await import('../src/access.mjs');
+  const opened = await openSession();
+  assert.equal(opened.status, 'logged_in', JSON.stringify(opened));
+  const s = opened.session;
+  const png = put('access-1.png', 'PNG');
+  const noDialog = () => { throw new Error('no dialog expected'); };
+  try {
+    process.env.HALLPASS_NO_UI = '1';
+    assert.match(run(s, ['upload', '#f', png]).text, /did not approve/, 'ask: no desktop = denied');
+    A.setAccess({ level: 'trusted', sites: ['example.org'], ttlMs: 3600e3 });
+    assert.match(run(s, ['upload', '#f', png]).text, /did not approve/, 'trusted for another site: still denied');
+    A.setAccess({ level: 'trusted', sites: ['127.0.0.1'], ttlMs: 3600e3 });
+    const ok = run(s, ['upload', '#f', png], noDialog);
+    assert.equal(ok.isError, false, ok.text);
+    assert.match(text(s, '#o'), /access-1\.png:3/);
+    A.setAccess({ level: 'full', ttlMs: 3600e3 });
+    assert.equal(run(s, ['upload', '#f', png], noDialog).isError, false);
+    // the file checks are not approvals
+    assert.match(run(s, ['upload', '#f', path.join(HOME, 'vault.txt')], noDialog).text, /refused/);
+    assert.match(run(s, ['upload', '#f', put('keys.json', '{}')], noDialog).text, /refused/);
+    process.env.HALLPASS_UPLOAD = 'off';
+    assert.match(run(s, ['upload', '#f', png], noDialog).text, /disabled/);
+    delete process.env.HALLPASS_UPLOAD;
+  } finally { delete process.env.HALLPASS_UPLOAD; A.clearAccess(); run(s, ['snapshot']); spawnSync(process.execPath, [BIN, 'logout', opened.name], { env: { ...process.env, HALLPASS_HOME: HOME } }); }
+});
+
 test('real browser: upload to a hidden file input, approval, and the one-hour grant', { timeout: 300_000 }, async () => {
   const opened = await openSession();
   assert.equal(opened.status, 'logged_in', JSON.stringify(opened));
@@ -172,3 +199,4 @@ test('real browser: release notes starting with dashes, screenshot to a file, an
     assert.ok(!/ROLLED/.test(run(s, ['get', 'title']).text));
   } finally { spawnSync(process.execPath, [BIN, 'logout', opened.name], { env: { ...process.env, HALLPASS_HOME: HOME } }); }
 });
+

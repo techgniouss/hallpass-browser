@@ -11,6 +11,7 @@ import { parseOrigin } from './origin.mjs';
 import { parseTotpInput, base32Decode } from './totp.mjs';
 import { openInDefaultBrowser } from './ui.mjs';
 import { audit } from './audit.mjs';
+import { cleanLabel } from './accounts.mjs';
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const mask = (u) => (u.includes('@') ? u[0] + '***@' + u.split('@')[1] : u.slice(0, 1) + '***');
@@ -21,7 +22,7 @@ const HEADERS = {
   'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
 };
 
-function page({ origin, name, actor, csrf, error }) {
+function page({ origin, name, actor, csrf, error, label = '' }) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Hallpass: add a login</title><style>
 :root{color-scheme:light dark;--bg:#fafaf8;--fg:#1b1b18;--mut:#60605a;--card:#fff;--line:#d9d9d2;--acc:#1f5eff;--bad:#b3261e}
@@ -46,6 +47,7 @@ ${error ? `<p class="err">${esc(error)}</p>` : ''}
 <label for="u">Username or email</label><input id="u" name="username" type="text" required autocomplete="off" autofocus>
 <label for="p">Password</label><input id="p" name="password" type="password" required minlength="6" autocomplete="new-password">
 <label for="t">Authenticator secret or otpauth:// link <small>(optional: lets Hallpass fill 2FA codes)</small></label><input id="t" name="totp" type="password" autocomplete="off">
+<label for="l">Nickname <small>(optional: helps you tell accounts apart, e.g. "work")</small></label><input id="l" name="label" type="text" maxlength="40" value="${esc(label)}" autocomplete="off">
 <div class="row"><input id="c" name="confirm" type="checkbox" value="1" required><label for="c" style="margin:0;font-weight:400">I trust <b>${esc(origin)}</b> and want this login used only there.</label></div>
 <div class="row"><input id="a" name="approval" type="checkbox" value="1"><label for="a" style="margin:0;font-weight:400">Ask me to approve each sign-in (recommended).</label></div>
 <button type="submit">Save login</button></form></div>
@@ -63,18 +65,28 @@ export function describeRequest(req) {
   const out = { status: 'awaiting_user', name: req.name, origin: req.origin, form_opened: req.opened, expires_in_sec: req.expiresInSec };
   if (!req.opened) out.form_url = req.formUrl;
   out.message = req.opened
-    ? `A form is open in the user's browser. Tell them to enter the login for ${req.origin} there (you cannot see it), wait for their reply, then call hallpass open again.`
-    : `The form could not be opened automatically. Give the user this one-time link to open in their own browser: ${req.formUrl}  (they enter the login for ${req.origin}; you cannot see it). Wait for their reply, then call hallpass open again.`;
+    ? `A form is open in the user's browser. Tell them to enter the login for ${req.origin} there (you cannot see it), wait for their reply, then call hallpass open again (with as="${req.name}" if the site has other accounts).`
+    : `The form could not be opened automatically. Give the user this one-time link to open in their own browser: ${req.formUrl}  (they enter the login for ${req.origin}; you cannot see it). Wait for their reply, then call hallpass open again (with as="${req.name}" if the site has other accounts).`;
   return out;
 }
 
-export async function startCredentialRequest({ url, name, ttlSec = 600, actor = process.env.HALLPASS_ACTOR === 'mcp' ? 'Your AI tool' : 'A command-line agent', launch = true } = {}) {
+// A second account on the same site: with no name given, pick the next free one (play-google-com, play-google-com-2, ...)
+function freeName(base) {
+  if (!vault.exists(base)) return base;
+  for (let i = 2; i < 50; i++) { const n = `${base.slice(0, 58)}-${i}`; if (!vault.exists(n)) return n; }
+  throw new Error('too many stored logins for this site; pass an explicit name');
+}
+
+export async function startCredentialRequest({ url, name, label, ttlSec = 600, actor = process.env.HALLPASS_ACTOR === 'mcp' ? 'Your AI tool' : 'A command-line agent', launch = true } = {}) {
   const origin = parseOrigin(url || '');
   if (!origin) throw new Error('url must be https:// (http:// only for localhost)');
-  name = name || defaultName(origin);
+  const explicit = !!name;
+  name = name || freeName(defaultName(origin));
   if (!vault.validName(name)) throw new Error('invalid name: use lowercase letters, digits, . _ -');
   if (name.startsWith('site-')) throw new Error('names starting with "site-" are reserved');
-  if (vault.exists(name)) throw new Error(`"${name}" already exists. Only a person can replace it: hallpass add ${name} --force`);
+  if (name === 'default') throw new Error('the name "default" is reserved');
+  if (explicit && vault.exists(name)) throw new Error(`"${name}" already exists. Only a person can replace it: hallpass add ${name} --force (or pick another name to add a second account for the site)`);
+  const nick = cleanLabel(label);
 
   if (pendingByOrigin.has(origin)) throw new Error(`a credential form for ${origin} is already waiting for the user: ask them to finish (or let it expire) first`);
   const nowMs = Date.now();
@@ -96,7 +108,7 @@ export async function startCredentialRequest({ url, name, ttlSec = 600, actor = 
     if (!hostOk) return send(403, 'forbidden', 'text/plain');
     if (u.pathname !== `/r/${token}`) return send(404, 'not found', 'text/plain');
 
-    if (req.method === 'GET') return send(200, page({ origin, name, actor, csrf }));
+    if (req.method === 'GET') return send(200, page({ origin, name, actor, csrf, label: nick }));
     if (req.method !== 'POST') return send(405, 'method not allowed', 'text/plain');
     if (req.headers.origin && req.headers.origin !== `http://127.0.0.1:${port}`) return send(403, 'forbidden', 'text/plain'); // cross-site form post
     if (!/^application\/x-www-form-urlencoded/i.test(req.headers['content-type'] || '')) return send(415, 'unsupported', 'text/plain');
@@ -106,7 +118,7 @@ export async function startCredentialRequest({ url, name, ttlSec = 600, actor = 
     req.on('end', () => {
       if (res.writableEnded) return;
       const f = Object.fromEntries(new URLSearchParams(Buffer.concat(chunks).toString('utf8')));
-      const again = (msg) => send(400, page({ origin, name, actor, csrf, error: msg }));
+      const again = (msg) => send(400, page({ origin, name, actor, csrf, error: msg, label: cleanLabel(f.label) }));
       if (++attempts > 5) { finish({ status: 'cancelled', name, reason: 'too many attempts' }); return send(429, 'too many attempts', 'text/plain'); }
       if (!f.csrf || f.csrf.length !== csrf.length || !crypto.timingSafeEqual(Buffer.from(f.csrf), Buffer.from(csrf))) return send(403, 'forbidden', 'text/plain');
       if (f.confirm !== '1') return again('Please confirm you trust this site.');
@@ -118,6 +130,7 @@ export async function startCredentialRequest({ url, name, ttlSec = 600, actor = 
         vault.put(name, {
           url, allowed: [origin], userHint: mask(f.username.trim()), hasTotp: !!totpCfg, selectors: {}, successUrl: null, successText: null,
           lockNavigation: false, createdAt: new Date().toISOString(), requireApproval: f.approval === '1', expiresAt: null, maxUses: null,
+          ...(cleanLabel(f.label) ? { label: cleanLabel(f.label) } : {}),
         }, { username: f.username.trim(), password: f.password, ...(totpCfg ? { totp: totpCfg } : {}) });
       } catch (e) { return send(500, 'could not save: ' + esc(e.message), 'text/plain'); }
       send(200, donePage(name));

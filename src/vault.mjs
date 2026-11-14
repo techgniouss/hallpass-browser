@@ -20,6 +20,8 @@ const aad = (name, meta) => Buffer.from(JSON.stringify({ name, meta }));
 export function put(name, meta, secrets) {
   // "site-<host>" is the key of the saved-session profile for credential-less sites; a credential with that name would collide with it
   if (typeof name === 'string' && name.startsWith('site-')) throw new Error('names starting with "site-" are reserved');
+  // "default" is how --as names a site's unlabelled saved login
+  if (name === 'default' && !fs.existsSync(file(name))) throw new Error('the name "default" is reserved'); // one that already has the name (made before accounts existed) stays usable and replaceable
   // If the master key is gone (new Windows profile, wiped keychain) but entries exist, minting a fresh key would
   // silently make every existing entry undecryptable. Refuse and say what happened instead.
   if (!masterKey({ create: false }) && fs.readdirSync(entriesDir()).some((f) => f.endsWith('.json'))) {

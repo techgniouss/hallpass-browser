@@ -33,7 +33,7 @@ export function importVault(bundle, passphrase, { force = false } = {}) {
   for (const e of plain.entries) {
     if (!vault.validName(e.name)) { result.skipped.push({ name: String(e.name).slice(0, 40), why: 'invalid name' }); continue; }
     if (vault.exists(e.name) && !force) { result.skipped.push({ name: e.name, why: 'exists (use --force to replace)' }); continue; }
-    vault.put(e.name, e.meta, e.secrets);
+    try { vault.put(e.name, e.meta, e.secrets); } catch (err) { result.skipped.push({ name: e.name, why: String(err.message).slice(0, 80) }); continue; }
     result.imported.push(e.name);
   }
   audit('import', { imported: result.imported.length, skipped: result.skipped.length });

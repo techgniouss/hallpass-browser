@@ -212,8 +212,9 @@ test('open: stored credential for the origin is found from the URL (deep link)',
 test('open: several credentials match the origin -> refuses to guess', async () => {
   const r = await hp(['open', `http://localhost:${site.port}/simple/app`]);
   assert.equal(r.json?.status, 'failed', r.out + r.err);
-  assert.equal(r.json.reason, 'ambiguous_credential');
+  assert.equal(r.json.reason, 'ambiguous_account');
   assert.ok(r.json.candidates.includes('simple') && r.json.candidates.includes('badpw'));
+  assert.ok(r.json.accounts.every((a) => a.description && !JSON.stringify(a).includes(PASSWORD)), 'each choice is described for the person, without secrets');
 });
 
 test('regression: an email box on an already-logged-in page never receives the username', { timeout: 240_000 }, async () => {

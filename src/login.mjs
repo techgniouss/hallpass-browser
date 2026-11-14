@@ -12,9 +12,12 @@ import { totp, secondsLeft, parseTotpInput } from './totp.mjs';
 import { profilesDir, stateDir } from './paths.mjs';
 import { checkEligibility, authorizeUse } from './policy.mjs';
 import { audit } from './audit.mjs';
+import { getAccess } from './access.mjs';
+import { refreshIfStale, noticeOnce } from './update.mjs';
 import { ensureReady } from './setup.mjs';
 import { notify } from './ui.mjs';
 import { resolveSecrets, resolveRef, looksLikeCode, SecretUnavailable } from './refs.mjs';
+import { siteKey, parseSiteKey, resolveAccount, accountsFor, validLabel, DEFAULT_ACCOUNT } from './accounts.mjs';
 
 // Everything that flows back to the model and originates from the page is untrusted text: cap it, strip control chars.
 const safeUrl = (u) => rawSafeUrl(u).slice(0, 200);
@@ -28,7 +31,8 @@ const toDomain = (a) => (a.startsWith('https://*.') ? '*.' + a.slice('https://*.
 // ---------- run context ----------
 // Profile/session key for a site that has no vault entry. Human logins persist here, so later headless
 // opens of the same site reuse the session without any stored credential.
-export const siteKey = (url) => ('site-' + new URL(url).hostname).replace(/[^a-z0-9.-]/gi, '-').toLowerCase().slice(0, 63);
+// A site can have several saved logins (one per account): siteKey(url, label). See accounts.mjs.
+export { siteKey };
 
 function makeCtx(name, o) {
   if (!vault.exists(name)) return makeGeneric(name, o);
@@ -92,7 +96,9 @@ function buildCtx(name, meta, secrets, redactor, o, generic = false) {
 }
 
 const note = (ctx, msg) => { ctx.trace.push(`${new Date().toISOString().slice(11, 19)} ${ctx.redactor.scrub(msg)}`); };
-const base = (ctx) => ({ name: ctx.name, session: ctx.session, mode: ctx.browser?.headed ? 'headed' : 'headless' });
+// account = what to pass as --as / "as" to come back to the same login (credential name, label, or "default")
+const accountOf = (ctx) => (ctx.generic ? parseSiteKey(ctx.name)?.label || DEFAULT_ACCOUNT : ctx.name);
+const base = (ctx) => ({ name: ctx.name, session: ctx.session, account: accountOf(ctx), mode: ctx.browser?.headed ? 'headed' : 'headless' });
 
 // via: vault = hallpass typed the credentials; human = the user logged in; session = an existing saved session / no login needed
 const ok = (ctx, p) => ({
@@ -114,7 +120,7 @@ const needsHuman = (ctx, reason) => {
   };
   ctx.keepFilled = true; // a person may be about to finish this form in the visible window
   writeState(ctx, 'needs_human', { reason });
-  const where = ctx.browser?.headed ? 'A Chrome window is open on it.' : 'No window is open (headless): re-run without --headless to get a visible one.';
+  const where = ctx.browser?.headed ? 'A Chrome window is open on it.' : 'No window is open (headless): re-run hallpass open without --headless (or with --headed) so the user gets a visible window to sign in.';
   return {
     status: 'needs_human', reason, ...base(ctx), url: safeUrl(ctx.last?.url || ''),
     message: `${hints[reason] || reason} ${where} Ask the user to complete it in that window, then run: hallpass resume ${ctx.name}`,
@@ -378,24 +384,29 @@ async function openSiteImpl(url, o = {}) {
   }
   const origin = parseOrigin(url);
   if (!origin) return { status: 'failed', reason: 'bad_url', detail: 'URL must be https:// (http:// only for localhost)' };
-  const mode = o.mode || 'auto';
-  if (o.as && !vault.exists(o.as)) return { status: 'failed', reason: 'no_such_credential', detail: `no credential named "${o.as}"` };
-  const matches = o.as ? [o.as] : vault.findByUrl(url);
-  if (matches.length > 1) {
-    // Never guess which account to log in as: wrong guesses can lock accounts or act as the wrong identity.
-    return { status: 'failed', reason: 'ambiguous_credential', candidates: matches, detail: `${matches.length} stored credentials match ${origin}. Ask the user which account, then re-run with --as <name> (or --headed to let the user log in).` };
-  }
-  const entry = matches[0] || null;
-  if (entry && mode !== 'headed') return loginImpl(entry, { target: url, headed: mode === 'headless' ? false : undefined, timeout: o.timeout, wait: o.wait });
+  // The person can fix the window policy in the MCP client's env (an agent cannot change it): HALLPASS_WINDOW=visible | headless.
+  //   headed    a visible window and the PERSON signs in (nothing is typed for them)
+  //   visible   a visible window and a stored credential is still typed automatically (watch the agent work)
+  let mode = o.mode || 'auto';
+  const policy = String(process.env.HALLPASS_WINDOW || '').toLowerCase();
+  if (policy === 'visible' && mode !== 'headed') mode = 'visible';
+  else if (policy === 'headless') mode = 'headless';
+  if (!['auto', 'headed', 'headless', 'visible'].includes(mode)) return { status: 'failed', reason: 'bad_mode', detail: 'mode must be auto, headed, headless or visible' };
+  // Which login? A stored credential (by name), a saved browser login (by label), or the site's default one.
+  // Never guess between several: wrong guesses lock accounts or act as the wrong identity.
+  const picked = resolveAccount(url, o.as, { create: !!o.create });
+  if (picked.error) return picked.error;
+  const entry = picked.entry || null;
+  if (entry && mode !== 'headed') return loginImpl(entry, { target: url, headed: mode === 'headless' ? false : mode === 'visible' ? true : undefined, timeout: o.timeout, wait: o.wait });
 
-  const key = entry || siteKey(url);
+  const key = entry || picked.key;
   const release = lock(key);
   try {
     const ctx = makeCtx(key, { url });
     ctx.humanMode = true;
     ctx.openUrl = url;
     const deadline = () => Date.now() + (o.timeout ?? 60) * 1000;
-    ctx.browser = ctx.mk(mode === 'headed');
+    ctx.browser = ctx.mk(mode === 'headed' || mode === 'visible');
     const opened = ctx.browser.open(url);
     if (!opened.ok) return openFailed(ctx, opened);
     let r = await drive(ctx, { wait: false, noFill: true, deadline: deadline() });
@@ -422,6 +433,11 @@ async function openSiteImpl(url, o = {}) {
     }
     if (r.status === 'needs_human' && o.wait) r = await drive(ctx, { wait: true, noFill: true, deadline: Date.now() + o.wait * 1000 });
     if (r.status === 'logged_in') writeState(ctx, 'logged_in');
+    if (picked.isNew && !entry) r.new_account = true; // first use of this label: a fresh, empty saved login
+    if (!entry && picked.label === DEFAULT_ACCOUNT && !picked.isNew && accountsFor(url).accounts.length > 1) {
+      r.unnamed = true; // a login from before accounts had names, now sharing the site with others
+      r.hint = 'This saved login has no name yet. Ask the user whose account it is and, if they want, name it: hallpass name-login <url> <name> (MCP hallpass_name_login).';
+    }
     return r;
   } finally { release(); }
 }
@@ -451,6 +467,9 @@ async function resumeImpl(name, o = {}) {
 // every public entry point is logged (no secrets: names, origin+path, outcomes) and nudges the user when a window needs them
 const audited = (event, fn) => async (...args) => {
   const r = await fn(...args);
+  refreshIfStale(); // quiet once-a-day version check in a detached process (never blocks)
+  { const n = noticeOnce(); if (n && r && typeof r === 'object') r.update_available = n; } // shown once per new version per day
+  { const lvl = getAccess().level; if (lvl !== 'ask' && r && typeof r === 'object') r.access = lvl; } // so the agent and person can see dialogs are being skipped
   audit(event, { name: r.name, target: typeof args[0] === 'string' && /^https?:/i.test(args[0]) ? safeUrl(args[0]) : undefined, status: r.status, reason: r.reason, via: r.via, mode: r.mode, url: r.url });
   if (r.status === 'needs_human' && r.mode === 'headed') notify('Hallpass needs you', 'A browser window is waiting for you to sign in or complete a check.');
   return r;
@@ -458,6 +477,28 @@ const audited = (event, fn) => async (...args) => {
 export const login = audited('login', loginImpl);
 export const openSite = audited('open', openSiteImpl);
 export const resume = audited('resume', resumeImpl);
+
+/** Give the site's unnamed (pre-accounts) saved login a name, keeping its cookies: site-<host> -> site-<host>__<label>. */
+export function nameLogin(url, label) {
+  const origin = parseOrigin(url);
+  if (!origin) return { status: 'failed', reason: 'bad_url', detail: 'URL must be https:// (http:// only for localhost)' };
+  if (!validLabel(label) || label === DEFAULT_ACCOUNT) return { status: 'failed', reason: 'bad_account_name', detail: 'label: lowercase letters, digits and - (max 32); "default" is taken' };
+  if (vault.validName(label) && vault.exists(label)) return { status: 'failed', reason: 'name_taken', detail: `"${label}" is already the name of a stored credential` };
+  const from = siteKey(url), to = siteKey(url, label);
+  const src = path.join(profilesDir(), from), dst = path.join(profilesDir(), to);
+  if (!fs.existsSync(src)) return { status: 'failed', reason: 'nothing_to_name', detail: `there is no unnamed saved login for ${origin}` };
+  if (fs.existsSync(dst)) return { status: 'failed', reason: 'name_taken', detail: `this site already has a saved login called "${label}"` };
+  const release = lock(from);
+  try {
+    new Browser({ session: sessionName(from), profile: src, redactor: new Redactor() }).close(); // a running Chrome holds its profile open
+    fs.renameSync(src, dst);
+    try { fs.renameSync(path.join(stateDir(), from + '.json'), path.join(stateDir(), to + '.json')); } catch { /* no state yet */ }
+    audit('name_login', { name: to, origin });
+    return { status: 'renamed', from: DEFAULT_ACCOUNT, as: label, name: to, note: `Use it with: hallpass open <url> --as ${label}` };
+  } catch (e) {
+    return { status: 'failed', reason: 'rename_failed', detail: String(e.message).slice(0, 200) };
+  } finally { release(); }
+}
 
 export function status(name) {
   const meta = vault.exists(name) ? vault.meta(name) : { allowed: null };

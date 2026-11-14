@@ -173,3 +173,58 @@ test('read-only server: observation works, every state change is refused', { tim
     await c.call('hallpass_logout', { name: opened.name });
   } finally { c.close(); }
 });
+
+test('access levels: trusted/full waive the click dialog (and say so in the audit log); other sites and "ask" still confirm', { timeout: 300_000 }, async () => {
+  const A = await import('../src/access.mjs');
+  const { readLog } = await import('../src/audit.mjs');
+  const c = mcp({ HALLPASS_NO_UI: '1', HALLPASS_GATE: 'off' }); // gate off only to open the page
+  try {
+    const opened = JSON.parse((await c.call('hallpass_open', { url: `http://127.0.0.1:${port}/danger/app` })).content[0].text);
+    const s = opened.session;
+    const noDialog = () => { throw new Error('no dialog expected'); };
+    const reset = () => runBrowser({ session: s, command: ['reload'] });
+
+    A.setAccess({ level: 'full', ttlMs: 3600e3 });
+    const r1 = runBrowser({ session: s, command: ['click', '#del'] }, { approver: noDialog });
+    assert.equal(r1.isError, false, r1.text);
+    assert.match(await title(c, s), /DELETED/);
+    reset();
+
+    A.setAccess({ level: 'trusted', sites: ['example.org'] }); // some other site: still asks
+    let asked = 0;
+    const r2 = runBrowser({ session: s, command: ['click', '#del'] }, { approver: () => { asked++; return 'deny'; } });
+    assert.equal(r2.isError, true); assert.equal(asked, 1);
+    assert.ok(!/DELETED/.test(await title(c, s)));
+
+    A.setAccess({ level: 'trusted', sites: ['127.0.0.1'] }); // this site: waived
+    const r3 = runBrowser({ session: s, command: ['activate', '#del'] }, { approver: noDialog });
+    assert.equal(r3.isError, false, r3.text);
+    assert.match(await title(c, s), /DELETED/);
+    reset();
+
+    A.setAccess({ level: 'full', ttlMs: 3600e3, now: Date.now() - 7200e3 }); // expired: back to asking
+    assert.equal(runBrowser({ session: s, command: ['click', '#del'] }, { approver: () => 'deny' }).isError, true);
+
+    A.clearAccess();
+    assert.equal(runBrowser({ session: s, command: ['click', '#del'] }, { approver: () => 'deny' }).isError, true, 'ask again');
+    assert.equal(runBrowser({ session: s, command: ['click', '#del'] }, { approver: () => 'once' }).isError, false);
+
+    const waived = readLog({ tail: 200 }).filter((e) => e.event === 'gate' && e.decision === 'allowed-by-access');
+    assert.equal(waived.length, 2, JSON.stringify(waived));
+    assert.match(waived[0].label, /delete/i);
+    await c.call('hallpass_logout', { name: opened.name });
+  } finally { A.clearAccess(); c.close(); }
+});
+
+test('access levels never relax read-only mode', { timeout: 300_000 }, async () => {
+  const A = await import('../src/access.mjs');
+  const c = mcp({ HALLPASS_NO_UI: '1', HALLPASS_GATE: 'off' });
+  try {
+    const opened = JSON.parse((await c.call('hallpass_open', { url: `http://127.0.0.1:${port}/danger/app` })).content[0].text);
+    A.setAccess({ level: 'full', ttlMs: 3600e3 });
+    process.env.HALLPASS_READONLY = '1';
+    assert.match(runBrowser({ session: opened.session, command: ['click', '#next'] }, { approver: () => 'once' }).text, /read-only/);
+    delete process.env.HALLPASS_READONLY;
+    await c.call('hallpass_logout', { name: opened.name });
+  } finally { delete process.env.HALLPASS_READONLY; A.clearAccess(); c.close(); }
+});

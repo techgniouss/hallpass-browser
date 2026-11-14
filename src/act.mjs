@@ -12,6 +12,7 @@ import { Redactor } from './redact.mjs';
 import { profilesDir } from './paths.mjs';
 import { ask } from './ui.mjs';
 import { audit } from './audit.mjs';
+import { bypasses, auditBypass } from './access.mjs';
 import { safeUrl, parseOrigin } from './origin.mjs';
 import { vetUploads, describeFiles, screenshotCommand } from './upload.mjs';
 
@@ -123,7 +124,9 @@ function authorizeUpload(b, session, command, approver) {
   const where = safeUrl((b.run(['get', 'url'], { json: false, timeout: 15_000 }).stdout || '').trim());
   const origin = parseOrigin(where) || where;
   const names = v.files.map((f) => path.basename(f.path)).join(', ').slice(0, 200);
-  if (uploadMode() === 'ask' && !((uploadGrants.get(origin) || 0) > Date.now())) {
+  if (uploadMode() === 'ask' && !((uploadGrants.get(origin) || 0) > Date.now()) && bypasses('upload', { url: where })) {
+    auditBypass('upload', { session, files: names, url: where }); // waived by `hallpass access`; the files were vetted above
+  } else if (uploadMode() === 'ask' && !((uploadGrants.get(origin) || 0) > Date.now())) {
     const choice = approver({
       title: 'Hallpass: confirm file upload',
       message: `Your AI tool wants to upload ${v.files.length} file${v.files.length > 1 ? 's' : ''} to:\n\n    ${where || 'the current page'}\n\n${describeFiles(v.files)}\n\nApprove only if you asked for this. "Allow for 1 hour" skips this question for ${origin || 'this site'} until then.`,
@@ -198,14 +201,19 @@ export function runBrowser({ session, command }, { approver = ask } = {}) {
     if (risky) {
       const where = safeUrl((b.run(['get', 'url'], { json: false, timeout: 15_000 }).stdout || '').trim());
       const shown = (label.trim() ? label : attrs).replace(/\s+/g, ' ').replace(/["{}\[\]\\]/g, '').replace(/\bresult\b|\btext\b/g, '').trim().slice(0, 90) || '(unlabelled control)';
-      const choice = approver({
-        title: 'Hallpass: confirm action',
-        message: `Your AI tool wants to ${command[0]}:\n\n    ${shown}\n\non ${where || 'the current page'}\n\n${mode === 'all' ? 'Every click and keystroke action is gated.' : 'This looks irreversible or outward-facing (publish, delete, pay, submit, ...).'}\nApprove only if this is exactly what you asked for.`,
-        buttons: [{ id: 'deny', label: 'Deny' }, { id: 'once', label: 'Allow this action' }],
-        timeoutSec: process.env.HALLPASS_ACTOR === 'mcp' ? 45 : 120,
-      });
-      audit('gate', { session, verb: command[0], label: shown, url: where, decision: choice === 'once' ? 'allowed' : 'denied' });
-      if (choice !== 'once') return { isError: true, text: 'Blocked: the user did not approve this action (denied, timed out, or no desktop dialog was available). Do not retry it. Explain to the user what you wanted to do and ask them to do it or to approve it.' };
+      if (bypasses('gate', { url: where })) {
+        // The person waived this dialog for this site (or everywhere) with `hallpass access trusted|full`. Still audited.
+        auditBypass('gate', { session, verb: command[0], label: shown, url: where });
+      } else {
+        const choice = approver({
+          title: 'Hallpass: confirm action',
+          message: `Your AI tool wants to ${command[0]}:\n\n    ${shown}\n\non ${where || 'the current page'}\n\n${mode === 'all' ? 'Every click and keystroke action is gated.' : 'This looks irreversible or outward-facing (publish, delete, pay, submit, ...).'}\nApprove only if this is exactly what you asked for.`,
+          buttons: [{ id: 'deny', label: 'Deny' }, { id: 'once', label: 'Allow this action' }],
+          timeoutSec: process.env.HALLPASS_ACTOR === 'mcp' ? 45 : 120,
+        });
+        audit('gate', { session, verb: command[0], label: shown, url: where, decision: choice === 'once' ? 'allowed' : 'denied' });
+        if (choice !== 'once') return { isError: true, text: 'Blocked: the user did not approve this action (denied, timed out, or no desktop dialog was available). Do not retry it. Explain to the user what you wanted to do and ask them to do it or to approve it.' };
+      }
     }
   }
 
