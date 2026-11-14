@@ -101,15 +101,28 @@ export function clearAccess() {
 
 /**
  * Does the current level waive this confirmation?
- *   kind  'gate' (risky click) | 'upload' | 'signin' (a stored login that asks first)
- *   url   the page the action happens on (gate/upload) or is aimed at (signin); unknown means "not trusted"
+ *   kind  'gate' (risky click) | 'upload'   (stored-login approvals have their own check: bypassesSignin)
+ *   url   the page the action happens on; unknown means "not trusted"
  *   access  injectable for tests
  */
 export function bypasses(kind, { url, access = getAccess() } = {}) {
   if (access.level === 'ask') return false;
-  if (kind === 'signin' && !access.includeCredentials) return false;
+  if (kind !== 'gate' && kind !== 'upload') return false;
   if (access.level === 'full') return true;
   return !!url && siteMatches(url, access.sites); // trusted: only on the listed sites
+}
+
+/**
+ * May this stored login's own approval dialog be skipped? Needs --include-credentials. Under "trusted", EVERY origin the login is
+ * allowed to be typed on (its login page and each approved origin, SSO hops included) must be a listed site: the URL an agent asked
+ * to open proves nothing, since a trusted site can redirect to anywhere.
+ */
+export function bypassesSignin(meta, { access = getAccess() } = {}) {
+  if (access.level === 'ask' || !access.includeCredentials) return false;
+  if (access.level === 'full') return true;
+  const origins = [...new Set([meta?.url, ...(Array.isArray(meta?.allowed) ? meta.allowed : [])].filter(Boolean))];
+  if (!origins.length) return false;
+  return origins.every((o) => (o.includes('*.') ? access.sites.includes(o) : siteMatches(o, access.sites)));
 }
 
 // A site entry is an origin ("https://play.google.com"), a wildcard ("https://*.supabase.com"), or a local dev host given without a port

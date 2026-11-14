@@ -53,11 +53,20 @@ test('trusted: only the listed sites skip dialogs; unknown page = still asks; cr
   assert.equal(g(''), false, 'unreadable page means ask');
   assert.equal(g(undefined), false);
   assert.equal(A.bypasses('upload', { url: 'https://play.google.com/x' }), true);
-  assert.equal(A.bypasses('signin', { url: 'https://play.google.com/x' }), false, 'stored-login approvals are not waived by default');
+  assert.equal(A.bypasses('signin', { url: 'https://play.google.com/x' }), false, 'stored-login approvals have their own check');
+  const play = { url: 'https://play.google.com/console', allowed: ['https://play.google.com'] };
+  assert.equal(A.bypassesSignin(play), false, 'stored-login approvals are not waived by default');
   A.setAccess({ level: 'trusted', sites: ['play.google.com'], includeCredentials: true });
-  assert.equal(A.bypasses('signin', { url: 'https://play.google.com/x' }), true);
-  assert.equal(A.bypasses('signin', { url: 'https://other.example/x' }), false);
-  assert.equal(A.bypasses('signin', { url: undefined }), false);
+  assert.equal(A.bypassesSignin(play), true);
+  assert.equal(A.bypassesSignin({ url: 'https://other.example/', allowed: ['https://other.example'] }), false);
+  assert.equal(A.bypassesSignin({ url: undefined, allowed: [] }), false);
+  // an SSO hop the login is allowed on must be trusted too: the login can be typed there
+  assert.equal(A.bypassesSignin({ url: 'https://play.google.com/console', allowed: ['https://play.google.com', 'https://accounts.google.com'] }), false);
+  A.setAccess({ level: 'trusted', sites: ['play.google.com', 'accounts.google.com'], includeCredentials: true });
+  assert.equal(A.bypassesSignin({ url: 'https://play.google.com/console', allowed: ['https://play.google.com', 'https://accounts.google.com'] }), true);
+  A.setAccess({ level: 'trusted', sites: ['*.supabase.com'], includeCredentials: true });
+  assert.equal(A.bypassesSignin({ url: 'https://app.supabase.com/login', allowed: ['https://app.supabase.com', 'https://*.supabase.com'] }), true);
+  assert.equal(A.bypassesSignin({ url: 'https://app.supabase.com/login', allowed: ['https://*.supabase.com', 'https://*.evil.example'] }), false);
 });
 
 test('full: every site skips click/upload dialogs; stored-login approvals only with --include-credentials; always expires by default', skipKs, () => {
@@ -65,11 +74,11 @@ test('full: every site skips click/upload dialogs; stored-login approvals only w
   assert.equal(A.bypasses('gate', { url: 'https://anything.example/' }), true);
   assert.equal(A.bypasses('gate', { url: '' }), true);
   assert.equal(A.bypasses('upload', { url: 'https://anything.example/' }), true);
-  assert.equal(A.bypasses('signin', { url: 'https://anything.example/' }), false);
+  assert.equal(A.bypassesSignin({ url: 'https://anything.example/', allowed: ['https://anything.example'] }), false, 'full without --include-credentials');
   const a = A.getAccess();
   assert.ok(Date.parse(a.expiresAt) - Date.now() > 3.9 * 3600e3 && Date.parse(a.expiresAt) - Date.now() <= 4 * 3600e3);
   A.setAccess({ level: 'full', includeCredentials: true });
-  assert.equal(A.bypasses('signin', { url: 'https://anything.example/' }), true);
+  assert.equal(A.bypassesSignin({ url: 'https://anything.example/', allowed: ['https://anything.example'] }), true);
   assert.equal(A.getAccess().expiresAt, null, 'no ttl given to the library = never (the CLI is what applies the 4h default)');
   assert.equal(A.describeAccess().expires_in, 'never');
 });
@@ -158,10 +167,15 @@ test('stored-login approval: waived only when the person said so; limits and exp
   A.setAccess({ level: 'trusted', sites: ['other.example.com'], includeCredentials: true });
   policy.resetUses('needs-ok');
   assert.equal(policy.authorizeUse('needs-ok', { target, approver: () => 'deny' })?.reason, 'approval_denied', 'trusted for a different site still asks');
+  // the URL the agent asked for being trusted is not enough: a trusted site can redirect to the login's real site
+  assert.equal(policy.authorizeUse('needs-ok', { target: 'https://other.example.com/redirects-to-login', approver: () => 'deny' })?.reason, 'approval_denied', 'a trusted target URL does not waive a login whose own origins are not trusted');
+  A.setAccess({ level: 'trusted', sites: ['login.example.com'], includeCredentials: true });
+  assert.equal(policy.authorizeUse('needs-ok', { target: 'https://unrelated.example/', approver: noDialog }), null, 'the login own origin is what counts');
   A.clearAccess();
 
   const log = readLog({ tail: 50 }).filter((e) => e.event === 'approval' && e.decision === 'allowed-by-access');
-  assert.ok(log.length >= 2 && log.every((e) => e.level === 'full'), JSON.stringify(log));
+  assert.equal(log.filter((e) => e.level === 'full').length, 2, JSON.stringify(log));
+  assert.equal(log.filter((e) => e.level === 'trusted').length, 1, 'the trusted-level waiver is recorded with its level');
   assert.ok(readLog({ tail: 80 }).some((e) => e.event === 'access' && e.level === 'full'), 'turning it on is itself logged');
 });
 

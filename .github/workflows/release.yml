@@ -29,6 +29,9 @@ jobs:
         run: |
           v=$(node -p "require('./package.json').version")
           if npm view "hallpass-browser@$v" version >/dev/null 2>&1; then echo "exists=true" >> "$GITHUB_OUTPUT"; echo "hallpass-browser@$v is already published; nothing to do"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
+      - name: Install dependencies (same as CI; the unit tests expect agent-browser to be present)
+        run: npm install --no-audit --no-fund
+        if: steps.published.outputs.exists != 'true'
       - run: npm test
         if: steps.published.outputs.exists != 'true'
       - run: npm publish --provenance --access public

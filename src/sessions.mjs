@@ -32,8 +32,10 @@ function lastUsed(name) {
 
 function runningSessions() {
   const b = new Browser({ session: 'hp-probe', profile: path.join(os.tmpdir(), 'hp-probe'), redactor: new Redactor() });
-  const r = b.run(['session', 'list'], { timeout: 15_000, bare: true });
-  return new Set(Array.isArray(r.json?.data?.sessions) ? r.json.data.sessions : []);
+  try {
+    const r = b.run(['session', 'list'], { timeout: 15_000, bare: true });
+    return new Set(Array.isArray(r.json?.data?.sessions) ? r.json.data.sessions : []);
+  } catch { return new Set(); } // agent-browser not installed: nothing is running
 }
 
 export function listSessions() {

@@ -124,8 +124,9 @@ test('how an install is recognised decides the update command', () => {
   assert.equal(d('/usr/local/lib/node_modules/hallpass-browser').method, 'npm-global');
   assert.equal(d('/usr/local/lib/node_modules/hallpass-browser').automatic, true);
   assert.equal(d('C:\\Users\\a\\AppData\\Roaming\\npm\\node_modules\\hallpass-browser').method, 'npm-global');
-  assert.equal(d(path.join(HERE, '..')).method, 'git-clone', 'this checkout is a git clone');
-  for (const m of ['claude-plugin', 'npx', 'git-clone']) assert.equal(d(m === 'claude-plugin' ? '/h/.claude/plugins/p' : m === 'npx' ? '/h/_npx/x' : path.join(HERE, '..')).automatic, false, m + ' is never auto-installed');
+  const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'hp-clone-')); fs.mkdirSync(path.join(clone, '.git'));
+  assert.equal(d(clone).method, 'git-clone', 'a folder with .git is a clone');
+  for (const [m, p] of [['claude-plugin', '/h/.claude/plugins/p'], ['npx', '/h/_npx/x'], ['git-clone', clone]]) assert.equal(d(p).automatic, false, m + ' is never auto-installed');
 });
 
 test('CLI: `hallpass update` reports, and without a real terminal it never installs anything', async () => {

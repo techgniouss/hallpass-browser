@@ -490,7 +490,7 @@ export function nameLogin(url, label) {
   if (fs.existsSync(dst)) return { status: 'failed', reason: 'name_taken', detail: `this site already has a saved login called "${label}"` };
   const release = lock(from);
   try {
-    new Browser({ session: sessionName(from), profile: src, redactor: new Redactor() }).close(); // a running Chrome holds its profile open
+    try { new Browser({ session: sessionName(from), profile: src, redactor: new Redactor() }).close(); } catch { /* agent-browser missing: no Chrome is holding the profile */ } // a running Chrome holds its profile open
     fs.renameSync(src, dst);
     try { fs.renameSync(path.join(stateDir(), from + '.json'), path.join(stateDir(), to + '.json')); } catch { /* no state yet */ }
     audit('name_login', { name: to, origin });
