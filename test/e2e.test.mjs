@@ -323,10 +323,10 @@ test('approval required: with no desktop dialog available the answer is deny and
   assert.equal((await hp(['show', 'gated'])).json.requireApproval, true);
   const before = site.log.posts.length;
   const r = await hp(['login', 'gated'], undefined, { HALLPASS_NO_UI: '1' });
-  assert.equal(r.json?.reason, 'approval_denied', r.out + r.err);
+  assert.equal(r.json?.reason, 'approval_unavailable', r.out + r.err);
   assert.equal(site.log.posts.length, before, 'no credential was typed');
   const viaOpen = await hp(['open', `http://localhost:${site.port}/simple/app`, '--as', 'gated', '--headless'], undefined, { HALLPASS_NO_UI: '1' });
-  assert.equal(viaOpen.json?.reason, 'approval_denied');
+  assert.equal(viaOpen.json?.reason, 'approval_unavailable');
 });
 
 test('expired and use-limited credentials stop working', { timeout: 240_000 }, async () => {
@@ -362,7 +362,7 @@ test('valid saved session: no approval dialog, no password-manager call, no decr
   // but the moment a credential must actually be typed, approval IS required (and fails closed here)
   await hp(['logout', 'lazy', '--wipe']);
   const needsIt = await hp(['login', 'lazy'], undefined, { HALLPASS_NO_UI: '1' });
-  assert.equal(needsIt.json?.reason, 'approval_denied', needsIt.out + needsIt.err);
+  assert.equal(needsIt.json?.reason, 'approval_unavailable', needsIt.out + needsIt.err);
 });
 
 test('human-mode open of a stored site never decrypts or asks the password manager', { timeout: 300_000 }, async () => {
@@ -376,7 +376,7 @@ test('audit log: records opens, logins, handoffs and denials; verifies; contains
   assert.equal(r.json.chain.ok, true, JSON.stringify(r.json.chain));
   const events = r.json.entries.map((e) => e.event);
   for (const ev of ['add', 'login', 'open', 'resume', 'approval']) assert.ok(events.includes(ev), 'missing ' + ev);
-  assert.ok(r.json.entries.some((e) => e.event === 'approval' && e.decision === 'deny'));
+  assert.ok(r.json.entries.some((e) => e.event === 'approval' && e.decision === 'no_ui'));
   assert.ok(r.json.entries.some((e) => e.status === 'needs_human'));
   const raw = fs.readFileSync(path.join(HOME, 'audit.log'), 'utf8');
   for (const n of [PASSWORD, REF_PW, TOTP.secret]) assert.ok(!raw.includes(n));
