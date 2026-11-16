@@ -7,7 +7,7 @@ import fs from 'node:fs';
 
 process.env.HALLPASS_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'hp-reasons-'));
 const ui = await import('../src/ui.mjs');
-const { isRiskyLabel } = await import('../src/act.mjs');
+const { isRiskyLabel, gateGrantKey } = await import('../src/act.mjs');
 
 test('ask() with the UI disabled reports no_ui, not denied', () => {
   process.env.HALLPASS_NO_UI = '1';
@@ -35,4 +35,12 @@ test('approval timeout is shorter for MCP than the CLI wait but long enough to n
 test('classifier: opening a release or a CI row is not gated, publishing still is', () => {
   for (const l of ['manage release 18 (1.3.8)', 'rocket_launch test and release', 'release\\n4m 23s', 'create new release', 'release notes']) assert.ok(!isRiskyLabel(l), 'should NOT be risky: ' + l);
   for (const l of ['Publish release', 'Start rollout', 'Send changes for review', 'submit 1 change for review', 'Discard release', 'delete remove 1.jpeg']) assert.ok(isRiskyLabel(l), 'should be risky: ' + l);
+});
+
+test('1-hour click grants are keyed by a real origin; no origin means no grant', () => {
+  assert.equal(gateGrantKey('hp-a', ''), null);
+  assert.equal(gateGrantKey('hp-a', 'not a url'), null);
+  assert.equal(gateGrantKey('hp-a', 'https://play.google.com/console/x'), gateGrantKey('hp-a', 'https://play.google.com/other'));
+  assert.notEqual(gateGrantKey('hp-a', 'https://play.google.com/x'), gateGrantKey('hp-b', 'https://play.google.com/x'), 'per session');
+  assert.notEqual(gateGrantKey('hp-a', 'https://play.google.com/x'), gateGrantKey('hp-a', 'https://evil.example/x'), 'per origin');
 });

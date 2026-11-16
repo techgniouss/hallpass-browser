@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.2 (fix: 1-hour click grant needs a real origin)
+
+Fixed
+- The new "Allow for 1 hour" on the click dialog (1.6.1) fell back to the raw page URL as the grant key when the page had no parseable origin, so one grant could cover every such page in the session. A grant is now keyed by session and a real origin only; when there is none the button is not offered, an "hour" answer is not honoured and the person is asked every time. Found by the automated security review of 1.6.1. **1.6.1 is affected: use 1.6.2.**
+
 ## 1.6.1 (fix: genuine approvals reported as "denied")
 
 Fixed

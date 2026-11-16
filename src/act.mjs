@@ -119,7 +119,8 @@ const uploadGrants = new Map(); // origin -> expiry; lives in this process only 
 // "Allow for 1 hour" on the click gate: one origin in one hallpass session, in this process only. Each use is still audited.
 const gateGrants = new Map(); // `${session}|${origin}` -> expiry
 const hostOf = (url) => { try { return new URL(url).hostname || ''; } catch { return ''; } };
-const gateGrantKey =(session, where) => `${session}|${parseOrigin(where) || where}`;
+// null when the page has no real origin: no grant is then offered or honoured, so the person is always asked.
+export const gateGrantKey = (session, where) => { const o = parseOrigin(where); return o ? `${session}|${o}` : null; };
 
 // Returns { error } or { command } with every file replaced by its vetted, symlink-resolved absolute path.
 function authorizeUpload(b, session, command, approver) {
@@ -211,19 +212,20 @@ export function runBrowser({ session, command }, { approver = ask } = {}) {
       if (bypasses('gate', { url: where })) {
         // The person waived this dialog for this site (or everywhere) with `hallpass access trusted|full`. Still audited.
         auditBypass('gate', { session, verb: command[0], label: shown, url: where });
-      } else if ((gateGrants.get(gateGrantKey(session, where)) || 0) > Date.now()) {
+      } else if (gateGrantKey(session, where) && (gateGrants.get(gateGrantKey(session, where)) || 0) > Date.now()) {
         audit('gate', { session, verb: command[0], label: shown, url: where, decision: 'allowed-grant' }); // inside a 1-hour grant
       } else {
         resetOutcome();
+        const canGrant = !!gateGrantKey(session, where);
         const choice = approver({
           title: 'Hallpass: confirm action',
-          message: `Your AI tool wants to ${command[0]}:\n\n    ${shown}\n\non ${where || 'the current page'}\n\n${mode === 'all' ? 'Every click and keystroke action is gated.' : 'This looks irreversible or outward-facing (publish, delete, pay, submit, ...).'}\nApprove only if this is exactly what you asked for.\n"Allow for 1 hour" skips this question for every risky click on this site in this session until then.`,
-          buttons: [{ id: 'deny', label: 'Deny' }, { id: 'hour', label: 'Allow for 1 hour' }, { id: 'once', label: 'Allow this action' }],
+          message: `Your AI tool wants to ${command[0]}:\n\n    ${shown}\n\non ${where || 'the current page'}\n\n${mode === 'all' ? 'Every click and keystroke action is gated.' : 'This looks irreversible or outward-facing (publish, delete, pay, submit, ...).'}\nApprove only if this is exactly what you asked for.${canGrant ? '\n"Allow for 1 hour" skips this question for every risky click on this site in this session until then.' : ''}`,
+          buttons: [{ id: 'deny', label: 'Deny' }, ...(canGrant ? [{ id: 'hour', label: 'Allow for 1 hour' }] : []), { id: 'once', label: 'Allow this action' }],
           timeoutSec: approvalTimeoutSec(),
         });
-        const ok = choice === 'once' || choice === 'hour';
+        const ok = choice === 'once' || (choice === 'hour' && canGrant); // never trust an 'hour' answer when no grant was offered
         audit('gate', { session, verb: command[0], label: shown, url: where, decision: ok ? (choice === 'hour' ? 'allowed-hour' : 'allowed') : (lastOutcome()?.reason === 'denied' || !lastOutcome() ? 'denied' : lastOutcome().reason) });
-        if (choice === 'hour') gateGrants.set(gateGrantKey(session, where), Date.now() + UPLOAD_GRANT_MS);
+        if (choice === 'hour' && canGrant) gateGrants.set(gateGrantKey(session, where), Date.now() + UPLOAD_GRANT_MS);
         if (!ok) return { isError: true, text: `Blocked: ${explainNoApproval('action', hostOf(where))}` };
       }
     }
