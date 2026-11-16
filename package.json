@@ -1,6 +1,6 @@
 {
   "name": "hallpass-browser",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Open any website in a browser your AI agent can drive and log in safely: credentials the agent can use but never read, with a hand-off to you for CAPTCHA/MFA. CLI, MCP server, and plugins for Claude Code, Codex, Gemini CLI and Antigravity.",
   "keywords": [
     "ai-agent",
@@ -48,7 +48,7 @@
     "provenance": true
   },
   "scripts": {
-    "test": "node --test test/unit.test.mjs test/accounts.test.mjs test/access.test.mjs test/update.test.mjs test/audit.test.mjs test/refs.test.mjs test/request.test.mjs test/ops.test.mjs test/trust.test.mjs test/packaging.test.mjs test/setup.test.mjs",
+    "test": "node --test test/unit.test.mjs test/accounts.test.mjs test/access.test.mjs test/update.test.mjs test/audit.test.mjs test/refs.test.mjs test/request.test.mjs test/ops.test.mjs test/trust.test.mjs test/packaging.test.mjs test/setup.test.mjs test/approval-reasons.test.mjs",
     "test:e2e": "node --test --test-concurrency=1 test/e2e.test.mjs",
     "test:mcp": "node --test --test-concurrency=1 test/mcp.test.mjs",
     "test:accounts": "node --test --test-concurrency=1 test/accounts-e2e.test.mjs",

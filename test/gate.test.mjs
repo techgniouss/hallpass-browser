@@ -59,7 +59,7 @@ test('gate (no desktop dialog = deny): dangerous clicks are blocked, harmless on
     for (const command of [['click', '#del'], ['click', '#icon'], ['click', '#sub'], ['find', 'text', 'Delete account', 'click']]) {
       const r = await c.call('browser', { session: s, command });
       assert.equal(r.isError, true, command.join(' '));
-      assert.match(r.content[0].text, /Blocked: the user did not approve/, command.join(' '));
+      assert.match(r.content[0].text, /Blocked: Not approved/, command.join(' '));
     }
     const t = await title(c, s);
     assert.ok(!/DELETED|PUBLISHED|SUBMITTED/.test(t), 'no dangerous handler ran: ' + t);

@@ -108,9 +108,9 @@ test('real browser: access levels waive the upload dialog, vetting and HALLPASS_
   const noDialog = () => { throw new Error('no dialog expected'); };
   try {
     process.env.HALLPASS_NO_UI = '1';
-    assert.match(run(s, ['upload', '#f', png]).text, /did not approve/, 'ask: no desktop = denied');
+    assert.match(run(s, ['upload', '#f', png]).text, /Not approved/, 'ask: no desktop = denied');
     A.setAccess({ level: 'trusted', sites: ['example.org'], ttlMs: 3600e3 });
-    assert.match(run(s, ['upload', '#f', png]).text, /did not approve/, 'trusted for another site: still denied');
+    assert.match(run(s, ['upload', '#f', png]).text, /Not approved/, 'trusted for another site: still denied');
     A.setAccess({ level: 'trusted', sites: ['127.0.0.1'], ttlMs: 3600e3 });
     const ok = run(s, ['upload', '#f', png], noDialog);
     assert.equal(ok.isError, false, ok.text);
@@ -135,11 +135,11 @@ test('real browser: upload to a hidden file input, approval, and the one-hour gr
     // no desktop dialog available (HALLPASS_NO_UI) = denied, and nothing reaches the page
     process.env.HALLPASS_NO_UI = '1';
     const none = run(s, ['upload', '#f', aab]);
-    assert.equal(none.isError, true); assert.match(none.text, /did not approve/);
+    assert.equal(none.isError, true); assert.match(none.text, /Not approved/);
     assert.ok(!/app-release/.test(text(s, '#o')));
 
     // the person denies
-    assert.match(run(s, ['upload', '#f', aab], () => 'deny').text, /did not approve/);
+    assert.match(run(s, ['upload', '#f', aab], () => 'deny').text, /Not approved/);
 
     // the person allows once: the dialog names the file and the site, and the page really receives it
     let shown = '';

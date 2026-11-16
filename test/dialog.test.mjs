@@ -81,13 +81,13 @@ for (const [label, expected] of [['Allow once', 'once'], ['Allow for 1 hour', 'h
 }
 
 for (const [keys, label] of [['{ENTER}', 'Enter'], [' ', 'Space']]) {
-  test(`native dialog: a stray ${label} keypress denies (focus defaults to Deny, never to an Allow button)`, { skip, timeout: 90_000 }, async (t) => {
-    const child = runChild({});
+  test(`native dialog: a stray ${label} keypress answers nothing (no button has focus, so it can neither approve nor deny)`, { skip, timeout: 90_000 }, async (t) => {
+    const child = runChild({ HALLPASS_APPROVAL_TIMEOUT_SEC: '6' });
     const k = await pressKeys(keys);
     if (k.code === 3) { await child; t.skip('the dialog was not the foreground window, so no keys were sent (they would have gone to another app)'); return; }
     assert.equal(k.code, 0, k.err);
     const r = await child;
-    assert.equal(r.out, 'deny', r.err);
+    assert.equal(r.out, 'null', r.err); // the dialog stayed open until it timed out; never "once" or "hour"
   });
 }
 

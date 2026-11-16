@@ -10,7 +10,7 @@ import path from 'node:path';
 import { Browser } from './ab.mjs';
 import { Redactor } from './redact.mjs';
 import { profilesDir } from './paths.mjs';
-import { ask } from './ui.mjs';
+import { ask, resetOutcome, lastOutcome, explainNoApproval, approvalTimeoutSec } from './ui.mjs';
 import { audit } from './audit.mjs';
 import { bypasses, auditBypass } from './access.mjs';
 import { safeUrl, parseOrigin } from './origin.mjs';
@@ -67,7 +67,9 @@ export const gateMode = () => { const m = (process.env.HALLPASS_GATE || 'risky')
 export const RISKY = /\b(submit|apply(?! (filter|filters|changes to view))|publish|release|roll ?out|deploy|promote|delete|remove|erase|destroy|terminate|drop|pay|purchase|buy|checkout|place order|order now|subscribe|upgrade|transfer|invite|revoke|disable|deactivate|send\b[^.\n]{0,40}\bfor (review|approval)|go live)\b/i;
 // Labels that contain a risky word but only open an editor or name a field (Play Console: "Create new release", "Release notes").
 // The final, outward-facing buttons ("Start rollout", "Publish", "Send for review") still match. Applied to the visible label only.
-const BENIGN = /\b(create new|review|view|edit)\s+releases?\b|\breleases?\s+(notes?|name|dashboard|history|type|summary|details|track)\b/gi;
+// Also: opening an existing release ("Manage release 18"), the "Test and release" nav card, and a CI run row whose label is only
+// "release" followed by its duration ("release\n4m 23s"). None of these changes anything outward-facing by itself.
+const BENIGN = /\b(create new|review|view|edit|manage)\s+releases?\b|\breleases?\s+(notes?|name|dashboard|history|type|summary|details|track)\b|\btest(ing)?\s+and\s+release\b|\breleases?(\s|\\n)+\d+\s*(s|m|h|d|min)\b/gi;
 export const isRiskyLabel = (label) => RISKY.test(String(label).replace(BENIGN, ' '));
 // Stems matched as SUBSTRINGS in id/class/name/data-testid (catches deleteBtn, btn-remove, publish_release, ...).
 export const RISKY_ATTR = /(delet|remov|destroy|erase|terminat|publish|release|rollout|deploy|promote|purchase|checkout|subscribe|upgrade|invite|revoke|deactivat|transfer|submit|pay(?!load)|buy)/i;
@@ -114,6 +116,10 @@ function labelFor(browser, t) {
 export const uploadMode = () => { const m = (process.env.HALLPASS_UPLOAD || 'ask').toLowerCase(); return ['off', 'ask', 'allow'].includes(m) ? m : 'ask'; };
 const UPLOAD_GRANT_MS = 60 * 60 * 1000;
 const uploadGrants = new Map(); // origin -> expiry; lives in this process only (the long-running MCP server), never on disk
+// "Allow for 1 hour" on the click gate: one origin in one hallpass session, in this process only. Each use is still audited.
+const gateGrants = new Map(); // `${session}|${origin}` -> expiry
+const hostOf = (url) => { try { return new URL(url).hostname || ''; } catch { return ''; } };
+const gateGrantKey =(session, where) => `${session}|${parseOrigin(where) || where}`;
 
 // Returns { error } or { command } with every file replaced by its vetted, symlink-resolved absolute path.
 function authorizeUpload(b, session, command, approver) {
@@ -127,15 +133,16 @@ function authorizeUpload(b, session, command, approver) {
   if (uploadMode() === 'ask' && !((uploadGrants.get(origin) || 0) > Date.now()) && bypasses('upload', { url: where })) {
     auditBypass('upload', { session, files: names, url: where }); // waived by `hallpass access`; the files were vetted above
   } else if (uploadMode() === 'ask' && !((uploadGrants.get(origin) || 0) > Date.now())) {
+    resetOutcome();
     const choice = approver({
       title: 'Hallpass: confirm file upload',
       message: `Your AI tool wants to upload ${v.files.length} file${v.files.length > 1 ? 's' : ''} to:\n\n    ${where || 'the current page'}\n\n${describeFiles(v.files)}\n\nApprove only if you asked for this. "Allow for 1 hour" skips this question for ${origin || 'this site'} until then.`,
       buttons: [{ id: 'deny', label: 'Deny' }, { id: 'hour', label: 'Allow for 1 hour' }, { id: 'once', label: 'Allow once' }],
-      timeoutSec: process.env.HALLPASS_ACTOR === 'mcp' ? 45 : 120,
+      timeoutSec: approvalTimeoutSec(),
     });
-    audit('upload', { session, files: names, url: where, decision: choice || 'deny' });
+    audit('upload', { session, files: names, url: where, decision: choice || lastOutcome()?.reason || 'deny' });
     if (choice === 'hour') uploadGrants.set(origin, Date.now() + UPLOAD_GRANT_MS);
-    else if (choice !== 'once') return { error: 'Blocked: the user did not approve this upload (denied, timed out, or no desktop dialog was available). Do not retry. Tell the user which file you wanted to upload and where.' };
+    else if (choice !== 'once') return { error: `Blocked: ${explainNoApproval('upload', hostOf(where))} Tell the user which file you wanted to upload and where.` };
   } else audit('upload', { session, files: names, url: where, decision: 'allowed' });
   return { command: ['upload', command[1], ...v.files.map((f) => f.path)] };
 }
@@ -204,15 +211,20 @@ export function runBrowser({ session, command }, { approver = ask } = {}) {
       if (bypasses('gate', { url: where })) {
         // The person waived this dialog for this site (or everywhere) with `hallpass access trusted|full`. Still audited.
         auditBypass('gate', { session, verb: command[0], label: shown, url: where });
+      } else if ((gateGrants.get(gateGrantKey(session, where)) || 0) > Date.now()) {
+        audit('gate', { session, verb: command[0], label: shown, url: where, decision: 'allowed-grant' }); // inside a 1-hour grant
       } else {
+        resetOutcome();
         const choice = approver({
           title: 'Hallpass: confirm action',
-          message: `Your AI tool wants to ${command[0]}:\n\n    ${shown}\n\non ${where || 'the current page'}\n\n${mode === 'all' ? 'Every click and keystroke action is gated.' : 'This looks irreversible or outward-facing (publish, delete, pay, submit, ...).'}\nApprove only if this is exactly what you asked for.`,
-          buttons: [{ id: 'deny', label: 'Deny' }, { id: 'once', label: 'Allow this action' }],
-          timeoutSec: process.env.HALLPASS_ACTOR === 'mcp' ? 45 : 120,
+          message: `Your AI tool wants to ${command[0]}:\n\n    ${shown}\n\non ${where || 'the current page'}\n\n${mode === 'all' ? 'Every click and keystroke action is gated.' : 'This looks irreversible or outward-facing (publish, delete, pay, submit, ...).'}\nApprove only if this is exactly what you asked for.\n"Allow for 1 hour" skips this question for every risky click on this site in this session until then.`,
+          buttons: [{ id: 'deny', label: 'Deny' }, { id: 'hour', label: 'Allow for 1 hour' }, { id: 'once', label: 'Allow this action' }],
+          timeoutSec: approvalTimeoutSec(),
         });
-        audit('gate', { session, verb: command[0], label: shown, url: where, decision: choice === 'once' ? 'allowed' : 'denied' });
-        if (choice !== 'once') return { isError: true, text: 'Blocked: the user did not approve this action (denied, timed out, or no desktop dialog was available). Do not retry it. Explain to the user what you wanted to do and ask them to do it or to approve it.' };
+        const ok = choice === 'once' || choice === 'hour';
+        audit('gate', { session, verb: command[0], label: shown, url: where, decision: ok ? (choice === 'hour' ? 'allowed-hour' : 'allowed') : (lastOutcome()?.reason === 'denied' || !lastOutcome() ? 'denied' : lastOutcome().reason) });
+        if (choice === 'hour') gateGrants.set(gateGrantKey(session, where), Date.now() + UPLOAD_GRANT_MS);
+        if (!ok) return { isError: true, text: `Blocked: ${explainNoApproval('action', hostOf(where))}` };
       }
     }
   }

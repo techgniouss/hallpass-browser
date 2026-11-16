@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.6.1 (fix: genuine approvals reported as "denied")
+
+Fixed
+- **A missing approval is no longer reported as a refusal.** A dialog that timed out (you did not see it), could not be shown (no GUI) or failed to run all came back as "denied", so the agent gave up even when you would have said yes. The audit log of one real user showed denials spaced exactly 2 minutes apart: unseen dialogs hitting the 120 s timeout. Now `ask()` records why (`denied`, `timeout`, `no_ui`, `error`, with PowerShell's stderr), the audit log stores that reason, and the agent is told: only a real Deny means "do not retry"; a timeout means "tell the user a dialog is waiting and retry once". Sign-ins return `approval_timeout`, `approval_unavailable` or `approval_error` besides `approval_denied`.
+- **Dialogs are harder to miss.** A desktop notification and a sound accompany every dialog, and the wait under MCP is 90 s (was 45 s; CLI stays 120 s).
+- **A stray key can no longer answer a dialog.** No button holds keyboard focus (before, Deny did, so Enter/Space while typing elsewhere denied). Esc still denies; only a click answers.
+- **Fewer needless prompts.** Opening an existing release ("Manage release 18"), the Play Console "Test and release" card and a CI run row ("release 4m 23s") no longer trigger the click gate. Publish, rollout, send for review and discard release still do.
+
+Added
+- **"Allow for 1 hour" on the click dialog**, for one site in one hallpass session, kept in memory only (never on disk) and audited as `allowed-grant`. It covers every risky click on that site until it expires, so use it deliberately.
+- **Command hints for the agent.** When a dialog was not answered, blocked-action messages, the MCP instructions and `hallpass_access` now tell the agent it may give you the command to run in your own terminal (`hallpass access trusted <site> --for 30d`, undo `hallpass access ask`). The agent still cannot run it.
+- **Delegation guidance.** A subagent cannot see your chat, so an approval you gave the main agent does not exist for it. The skill and MCP instructions say to copy the approval, scoped to the step, into the subagent's prompt; a subagent without one should report "needs user approval", not "denied".
+- Tests: `test/approval-reasons.test.mjs` (reason codes, timeouts, classifier). The real-dialog tests now check that Enter/Space answer nothing.
+
+Upgrading from 1.6.0: nothing to migrate. Scripts matching the old text "the user did not approve" should match "Not approved" instead.
+
 ## 1.6.0 (several accounts, watch mode, access levels, update notice)
 
 Added

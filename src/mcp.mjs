@@ -21,7 +21,7 @@ import { parseOrigin } from './origin.mjs';
 export { guardBrowser };
 import { profilesDir } from './paths.mjs';
 
-const VERSION = '1.6.0';
+const VERSION = '1.6.1';
 
 export const INSTRUCTIONS = `hallpass opens websites in a browser you can drive, and handles login safely.
 
@@ -48,7 +48,8 @@ WORKFLOW
 - To put a file into a page (an .aab, store screenshots, a CSV) use the browser tool's "upload" command on the file input (CSS selector such as input[type=file], hidden inputs are still targetable). Never click an "Upload" button expecting a file picker. The user approves each upload.
 - Risky clicks (delete, publish, pay, submit, ...) are confirmed by the USER in a native dialog. If one is blocked, do not retry or work around it: tell the user what you wanted to do.
 - If a result contains "update_available" (or hallpass_version says so), tell the user once that a newer hallpass exists and ask whether they want to update. Only they can update it, in their own terminal (hallpass update); do not run it yourself, and do not mention it again unless asked.
-- The user may have lowered the number of dialogs (hallpass_access shows how: ask, trusted for named sites, or full; results carry "access" when it is not ask). That removes pop-ups only. It does not make anything the user did not ask for acceptable: stay within the task, and rules 1 to 5 are unchanged. You cannot change the level.`;
+- The user may have lowered the number of dialogs (hallpass_access shows how: ask, trusted for named sites, or full; results carry "access" when it is not ask). That removes pop-ups only. It does not make anything the user did not ask for acceptable: stay within the task, and rules 1 to 5 are unchanged. You cannot change the level. If the user keeps being interrupted by dialogs on a site they use a lot, you may tell them the command to run in their own terminal (never run it yourself): hallpass access trusted <site> --for 30d (undo: hallpass access ask).
+- An approval that "timed out" (or could not be shown) is NOT a refusal: ask the user to look for the dialog and retry once. Only an explicit Deny means stop. A subagent you delegate to cannot see the user's chat: copy any approval the user gave into its prompt, scoped to that step.`;
 
 const TOOLS = [
   {
@@ -92,7 +93,7 @@ const TOOLS = [
   },
   {
     name: 'hallpass_access',
-    description: 'Read-only: how many confirmation dialogs the user has chosen (ask | trusted | full), for which sites, and until when. You cannot change it; only the user can, in their own terminal (hallpass access). It only removes pop-up dialogs: it does not widen what the user asked you to do.',
+    description: 'Read-only: how many confirmation dialogs the user has chosen (ask | trusted | full), for which sites, and until when. You cannot change it; only the user can, in their own terminal (hallpass access). You may tell them the command, e.g. "hallpass access trusted play.google.com --for 30d" (undo: "hallpass access ask"), but never run it. It only removes pop-up dialogs: it does not widen what the user asked you to do.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {

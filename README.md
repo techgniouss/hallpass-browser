@@ -156,7 +156,7 @@ If a site has more than one login and the agent does not say which, `open` stops
 
 ### How much it asks you (access levels)
 
-By default Hallpass asks you before anything risky: a native dialog for Delete / Publish / Pay / Submit-type clicks, for file uploads, and for stored logins you marked "ask each time". That is the right default. When you are doing a lot of trusted work, you can turn the dialogs down, **from your own terminal only** (an agent cannot):
+By default Hallpass asks you before anything risky: a native dialog for Delete / Publish / Pay / Submit-type clicks, for file uploads, and for stored logins you marked "ask each time". That is the right default. The click dialog also offers **Allow for 1 hour** (one site, one session, in memory only), and a dialog that times out is reported to the agent as "not seen", not as a refusal. When you are doing a lot of trusted work, you can turn the dialogs down, **from your own terminal only** (an agent cannot):
 
 | Level | What changes | Command |
 |---|---|---|
@@ -198,7 +198,7 @@ Hallpass tells you when a newer version is published, and lets you decide.
 
 | Control | What it does | How to turn it on |
 |---|---|---|
-| Per-use approval | Native dialog (Allow once / 1 hour / Deny), focus defaults to Deny; no desktop = deny | `add --require-approval` (or tick it in the request form) |
+| Per-use approval | Native dialog (Allow once / 1 hour / Deny), no button has keyboard focus so a stray key answers nothing; no desktop = not approved | `add --require-approval` (or tick it in the request form) |
 | Credential limits | Expiry and sign-in count | `--expires 30d`, `--max-uses 5` |
 | Lockout protection | After a rejected password, automatic login stops until a person fixes it | always on; `hallpass unlock <name>` / `add --force` |
 | Action gate | Delete / Publish / Pay / Submit-type clicks need a native confirmation | default for the MCP `browser` tool and `hallpass do`; loosen it deliberately with [access levels](#how-much-it-asks-you-access-levels) |

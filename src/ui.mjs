@@ -26,13 +26,14 @@ $x=$w-16
 for($i=$n-1;$i -ge 0;$i--){
   $b=New-Object System.Windows.Forms.Button; $b.Text=[string]@($j.buttons)[$i].label; $b.Tag=[string]@($j.buttons)[$i].id
   $b.Size=New-Object System.Drawing.Size($bw,34); $x-=$bw; $b.Location=New-Object System.Drawing.Point($x,200); $x-=8
+  $b.TabStop=$false   # no button holds keyboard focus, so a stray Enter/Space (typing in another window) answers nothing
   $b.Add_Click({ $script:choice=[string]$this.Tag; $f.Close() }); $f.Controls.Add($b)
   if($i -eq 0){ $script:def=$b }   # the first button is the safe one (Deny)
 }
-$f.ActiveControl=$script:def; $f.CancelButton=$script:def   # a stray Enter/Space/Esc can only ever DENY
-$t=New-Object System.Windows.Forms.Timer; $t.Interval=[int]$j.timeoutSec*1000; $t.Add_Tick({ $f.Close() }); $t.Start()
-$f.KeyPreview=$true; $f.Add_KeyDown({ if($_.KeyCode -eq 'Escape'){ $f.Close() } })  # Esc = deny
-$f.Add_Shown({ $f.Activate(); $f.TopMost=$true; [HpFg]::Front($f.Handle) })
+$f.CancelButton=$script:def   # Esc can only ever DENY; Enter/Space do nothing until a button is clicked
+$t=New-Object System.Windows.Forms.Timer; $t.Interval=[int]$j.timeoutSec*1000; $t.Add_Tick({ $script:choice='timeout'; $f.Close() }); $t.Start()
+$f.KeyPreview=$true; $f.Add_KeyDown({ if($_.KeyCode -eq 'Escape'){ $script:choice='deny'; $f.Close() } })  # Esc = deny
+$f.Add_Shown({ $f.Activate(); $f.TopMost=$true; [HpFg]::Front($f.Handle); try { [System.Media.SystemSounds]::Exclamation.Play() } catch {} })  # audible cue: the dialog is easy to miss
 [void]$f.ShowDialog()
 [Console]::Out.Write($script:choice)`;
 
@@ -48,29 +49,67 @@ Start-Sleep -Seconds 11; $n.Dispose()`;
 
 const enc = (s) => Buffer.from(s, 'utf16le').toString('base64');
 
-/** buttons: [{id,label}], first = safest default. Returns the chosen id, or null (denied / timed out / no UI). */
+// Why the last dialog did not approve. "null" from ask() used to mean denied, timed out, no UI and crashed alike, so a person
+// who simply did not see the dialog looked like a person who refused. Reasons: denied | timeout | no_ui | error (| approved).
+let last = null;
+export const resetOutcome = () => { last = null; };
+export const lastOutcome = () => last;
+const outcome = (choice, reason, detail = '', secs = 0) => { last = { reason: choice ? 'approved' : reason, detail: String(detail).slice(0, 200), secs }; return choice; };
+
+/** Default dialog wait. MCP calls block the server while the dialog is up, so the wait is shorter than for the CLI. */
+export const approvalTimeoutSec = () => (process.env.HALLPASS_ACTOR === 'mcp' ? 90 : 120);
+
+/**
+ * Text for the agent when an approval was not given. Only a real click on Deny says "do not retry": a timeout or a dialog that
+ * never showed is not a refusal, and telling the agent it was one is what made genuine approvals look like denials.
+ */
+export function explainNoApproval(what, site) {
+  const o = last || { reason: 'denied' };
+  // Only the person can lower the number of dialogs (it needs a real terminal); the agent may tell them the command, never run it.
+  const cmd = `hallpass access trusted ${site || '<site>'} --for 30d`;
+  const hint = ` If the user wants fewer of these prompts they can run this in their own terminal (you cannot run it): ${cmd}. Undo with: hallpass access ask.`;
+  switch (o.reason) {
+    case 'timeout':
+      return `Not approved: the approval dialog got no answer within ${o.secs || 'the allowed'}s, so the user most likely did not see it (check the taskbar and other windows). This is NOT a refusal. Tell the user a dialog is waiting, ask them to say when they are ready, then retry the same ${what} once; the dialog will reappear.${hint}`;
+    case 'no_ui':
+      return `Not approved: no desktop dialog could be shown (no GUI, or UI disabled with HALLPASS_NO_UI). The user cannot approve this ${what} from here. Ask them to do it themselves, to run hallpass on a desktop session, or to waive the dialog on trusted sites.${hint}`;
+    case 'error':
+      return `Not approved: the approval dialog failed to run (${o.detail || 'unknown error'}), so the user was never asked. This is not a refusal. Tell the user, and ask them to run "hallpass doctor" or to do this ${what} themselves.`;
+    default:
+      return `Not approved: the user clicked Deny (or closed the dialog). Do not retry this ${what}. Explain to the user what you wanted to do and ask them to do it or to approve it.`;
+  }
+}
+
+/** buttons: [{id,label}], first = safest default. Returns the chosen id, or null (denied / timed out / no UI): see lastOutcome(). */
 export function ask({ title, message, buttons, timeoutSec = 120 }) {
-  if (noUi()) return null;
+  if (noUi()) return outcome(null, 'no_ui', 'UI disabled');
   const secs = Number(process.env.HALLPASS_APPROVAL_TIMEOUT_SEC) || timeoutSec; // may only SHORTEN waiting; cannot approve
+  const wait = Math.min(secs, timeoutSec);
+  notify('Hallpass: approval needed', `${title}. A dialog is waiting for you (check the taskbar).`);
   try {
     if (process.platform === 'win32') {
       const ps = sysExe('powershell');
-      if (!ps) return null;
+      if (!ps) return outcome(null, 'no_ui', 'powershell not found');
       const r = spawnSync(ps, ['-NoProfile', '-NonInteractive', '-STA', '-EncodedCommand', enc(WIN_DIALOG)], {
-        input: JSON.stringify({ title, message, buttons, timeoutSec: Math.min(secs, timeoutSec) }), encoding: 'utf8', timeout: (secs + 15) * 1000, windowsHide: false,
+        input: JSON.stringify({ title, message, buttons, timeoutSec: wait }), encoding: 'utf8', timeout: (secs + 15) * 1000, windowsHide: false,
       });
+      if (r.error || r.status !== 0) return outcome(null, 'error', (r.stderr || '').trim().replace(/\s+/g, ' ') || (r.error && r.error.message) || `exit ${r.status}`);
       const id = (r.stdout || '').trim();
-      return r.status === 0 && buttons.some((b) => b.id === id) ? id : null;
+      if (buttons.some((b) => b.id === id)) return outcome(id, 'approved', '', wait);
+      return outcome(null, id === 'timeout' ? 'timeout' : 'denied', id ? '' : 'dialog closed', wait);
     }
     if (process.platform === 'darwin') {
       const labels = buttons.map((b) => b.label).slice(0, 3);
       const script = 'on run argv\nset t to item 1 of argv\nset m to item 2 of argv\nset s to (item 3 of argv) as integer\nset bl to items 4 thru -1 of argv\n' +
-        'try\nset r to display dialog m with title t buttons bl default button (last item of bl) giving up after s\nif gave up of r then return ""\nreturn button returned of r\non error\nreturn ""\nend try\nend run';
+        'try\nset r to display dialog m with title t buttons bl default button (last item of bl) giving up after s\nif gave up of r then return "__timeout"\nreturn button returned of r\non error\nreturn ""\nend try\nend run';
       const osa = sysExe('osascript');
-      if (!osa) return null;
+      if (!osa) return outcome(null, 'no_ui', 'osascript not found');
       const r = spawnSync(osa, ['-e', script, title, message, String(secs), ...labels], { encoding: 'utf8', timeout: (secs + 15) * 1000 });
-      const hit = buttons.find((b) => b.label === (r.stdout || '').trim());
-      return r.status === 0 && hit ? hit.id : null;
+      const out = (r.stdout || '').trim();
+      const hit = buttons.find((b) => b.label === out);
+      if (r.status === 0 && hit) return outcome(hit.id, 'approved', '', wait);
+      if (r.error || r.status !== 0) return outcome(null, 'error', (r.stderr || '').trim() || (r.error && r.error.message) || `exit ${r.status}`);
+      return outcome(null, out === '__timeout' ? 'timeout' : 'denied', '', wait);
     }
     // Linux: two-choice (allow / deny) via zenity or kdialog
     const allow = buttons[buttons.length - 1], deny = buttons[0];
@@ -82,10 +121,11 @@ export function ask({ title, message, buttons, timeoutSec = 120 }) {
       if (!cmd) continue; // not installed in a trusted location
       const r = spawnSync(cmd, args, { timeout: (secs + 15) * 1000 });
       if (r.error) continue;
-      return r.status === 0 ? allow.id : null;
+      if (r.status === 0) return outcome(allow.id, 'approved', '', wait);
+      return outcome(null, r.status === 5 ? 'timeout' : 'denied', '', wait); // zenity exits 5 when --timeout expires, 1 on Deny
     }
-  } catch { /* fall through */ }
-  return null;
+    return outcome(null, 'no_ui', 'no zenity or kdialog installed');
+  } catch (e) { return outcome(null, 'error', e && e.message); }
 }
 
 /** Best-effort desktop notification (never blocks, never throws). */

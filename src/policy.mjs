@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as vault from './vault.mjs';
 import { masterKey } from './keystore.mjs';
-import { ask } from './ui.mjs';
+import { ask, resetOutcome, lastOutcome, explainNoApproval, approvalTimeoutSec } from './ui.mjs';
 import { audit } from './audit.mjs';
 import { stateDir } from './paths.mjs';
 import { safeUrl } from './origin.mjs';
@@ -66,6 +66,7 @@ export function authorizeUse(name, { target, approver = ask, now = Date.now() } 
     auditBypass('signin', { name, target: target && safeUrl(target) });
   } else if (m.requireApproval && !grantValid(name, now)) {
     const actor = process.env.HALLPASS_ACTOR || 'a command-line agent';
+    resetOutcome();
     const choice = approver({
       title: 'Hallpass: approve sign-in',
       message: `An AI agent (${actor}) wants to sign in using your stored login "${name}".\n\n` +
@@ -73,12 +74,15 @@ export function authorizeUse(name, { target, approver = ask, now = Date.now() } 
         (target ? `Page it asked for: ${oneLine(safeUrl(target))}\n` : '') +
         `\nThe agent never sees the password. Approve only if you started this task.`,
       buttons: [{ id: 'deny', label: 'Deny' }, { id: 'hour', label: 'Allow for 1 hour' }, { id: 'once', label: 'Allow once' }],
-      timeoutSec: process.env.HALLPASS_ACTOR === 'mcp' ? 45 : 120, // MCP clients often time out tool calls near 60s
+      timeoutSec: approvalTimeoutSec(),
     });
-    audit('approval', { name, decision: choice || 'deny', target: target && safeUrl(target) });
+    const o = lastOutcome();
+    audit('approval', { name, decision: choice || o?.reason || 'deny', target: target && safeUrl(target) });
     if (choice === 'hour') writeGrant(name, now);
     if (choice !== 'hour' && choice !== 'once') {
-      return denied(name, 'approval_denied', 'The user did not approve this sign-in (denied, timed out, or no desktop dialog was available). Ask the user to approve it, or have them log in themselves with --headed.');
+      // 'approval_denied' only for a real Deny; a timeout / missing dialog is a different reason so the agent does not give up.
+      const r = !o || o.reason === 'denied' ? 'approval_denied' : o.reason === 'timeout' ? 'approval_timeout' : o.reason === 'no_ui' ? 'approval_unavailable' : 'approval_error';
+      return denied(name, r, explainNoApproval('sign-in') + ' Or have the user log in themselves with --headed.');
     }
   }
   bumpUses(name);
