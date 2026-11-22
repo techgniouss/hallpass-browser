@@ -36,10 +36,24 @@ test('an edited or hand-written grant file is worthless', () => {
   const scope = gateGrantKey('hp-tamper', 'https://play.google.com/x');
   g.writeSiteGrant('gate', scope);
   const dir = path.join(process.env.HALLPASS_HOME, 'state');
-  const f = fs.readdirSync(dir).find((n) => n.startsWith('site-gate-'));
+  const f = fs.readdirSync(dir).find((n) => n.startsWith('gate-') && n.endsWith('.sgrant'));
   const j = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
   fs.writeFileSync(path.join(dir, f), JSON.stringify({ ...j, exp: j.exp + 86_400_000 }));
   assert.equal(g.siteGrantValid('gate', scope), false, 'extended expiry detected');
   fs.writeFileSync(path.join(dir, f), JSON.stringify({ name: j.name, exp: Date.now() + 1e9, mac: 'ab'.repeat(32) }));
   assert.equal(g.siteGrantValid('gate', scope), false, 'forged signature detected');
+});
+
+test('a site grant file cannot be used as a stored-login grant (domain separation)', () => {
+  const scope = gateGrantKey('hp-xdomain', 'https://play.google.com/x');
+  const dir = path.join(process.env.HALLPASS_HOME, 'state');
+  const before = new Set(fs.readdirSync(dir));
+  g.writeSiteGrant('gate', scope);
+  const f = fs.readdirSync(dir).find((n) => !before.has(n) && n.endsWith('.sgrant'));
+  const name = f.slice(0, -'.sgrant'.length);
+  fs.copyFileSync(path.join(dir, f), path.join(dir, name + '.grant')); // pretend a login with this name exists
+  assert.equal(g.grantValid(name), false, 'site grant must not satisfy a login grant');
+  g.writeGrant(name); // a genuine login grant under that name...
+  fs.copyFileSync(path.join(dir, name + '.grant'), path.join(dir, f)); // and the other way round
+  assert.equal(g.siteGrantValid('gate', scope), false, 'login grant must not satisfy a site grant');
 });
