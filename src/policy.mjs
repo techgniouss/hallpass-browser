@@ -3,35 +3,19 @@
 //   expiresAt        credential stops working after this time
 //   maxUses          credential stops working after N sign-in attempts
 // The policy fields live in the entry's authenticated metadata, so editing them on disk breaks the entry.
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as vault from './vault.mjs';
-import { masterKey } from './keystore.mjs';
+import { grantValid, writeGrant, revokeGrant } from './grants.mjs';
 import { ask, resetOutcome, lastOutcome, explainNoApproval, approvalTimeoutSec } from './ui.mjs';
 import { audit } from './audit.mjs';
 import { stateDir } from './paths.mjs';
 import { safeUrl } from './origin.mjs';
 import { bypassesSignin, auditBypass } from './access.mjs';
 
-const GRANT_MS = 60 * 60 * 1000;
-const grantFile = (name) => path.join(stateDir(), name + '.grant');
 const usesFile = (name) => path.join(stateDir(), name + '.uses');
-
-// Grants are HMAC-signed with a key derived from the vault master key: writing a grant file by hand does nothing.
-const mac = (name, exp) => crypto.createHmac('sha256', crypto.createHash('sha256').update('hallpass-grant-v1').update(masterKey({ create: false }) || Buffer.alloc(0)).digest()).update(`${name}|${exp}`).digest('hex');
-
-export function grantValid(name, now = Date.now()) {
-  try {
-    const g = JSON.parse(fs.readFileSync(grantFile(name), 'utf8'));
-    return g.name === name && g.exp > now && crypto.timingSafeEqual(Buffer.from(g.mac, 'hex'), Buffer.from(mac(name, g.exp), 'hex'));
-  } catch { return false; }
-}
-export function writeGrant(name, now = Date.now()) {
-  const exp = now + GRANT_MS;
-  fs.writeFileSync(grantFile(name), JSON.stringify({ name, exp, mac: mac(name, exp) }), { mode: 0o600 });
-}
-export const revokeGrant = (name) => { try { fs.rmSync(grantFile(name)); } catch { /* none */ } };
+// Grants (HMAC-signed, on disk) live in grants.mjs; re-exported here for existing callers.
+export { grantValid, writeGrant, revokeGrant };
 
 const usesOf = (name) => { try { return JSON.parse(fs.readFileSync(usesFile(name), 'utf8')).n || 0; } catch { return 0; } };
 const bumpUses = (name) => fs.writeFileSync(usesFile(name), JSON.stringify({ n: usesOf(name) + 1 }));

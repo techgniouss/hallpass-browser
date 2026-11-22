@@ -3,6 +3,7 @@
 // HALLPASS_NO_UI=1 disables all UI (dialogs deny, notifications and browser opening are skipped): for tests/headless CI.
 import { spawn, spawnSync } from 'node:child_process';
 import { sysExe } from './sysexe.mjs';
+import { ignoredAccessNote } from './access.mjs';
 
 export const noUi = () => process.env.HALLPASS_NO_UI === '1';
 
@@ -67,7 +68,8 @@ export function explainNoApproval(what, site) {
   const o = last || { reason: 'denied' };
   // Only the person can lower the number of dialogs (it needs a real terminal); the agent may tell them the command, never run it.
   const cmd = `hallpass access trusted ${site || '<site>'} --for 30d`;
-  const hint = ` If the user wants fewer of these prompts they can run this in their own terminal (you cannot run it): ${cmd}. Undo with: hallpass access ask.`;
+  const note = ignoredAccessNote();
+  const hint = (note ? ' ' + note : '') + ` If the user wants fewer of these prompts they can run this in their own terminal (you cannot run it): ${cmd}. Undo with: hallpass access ask.`;
   switch (o.reason) {
     case 'timeout':
       return `Not approved: the approval dialog got no answer within ${o.secs || 'the allowed'}s, so the user most likely did not see it (check the taskbar and other windows). This is NOT a refusal. Tell the user a dialog is waiting, ask them to say when they are ready, then retry the same ${what} once; the dialog will reappear.${hint}`;

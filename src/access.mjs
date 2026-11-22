@@ -73,6 +73,22 @@ export function getAccess({ now = Date.now() } = {}) {
   return { level: d.level, sites: d.sites, expiresAt: d.expiresAt || null, includeCredentials: !!d.includeCredentials, setAt: d.setAt, source: 'file' };
 }
 
+/**
+ * One line for dialogs and agent messages when the person DID set trusted/full but it is not in force (expired, or its signature
+ * cannot be checked, e.g. this process cannot reach the vault key). Empty when nothing was set or it is working. Without it the
+ * person just sees prompts return and cannot tell why.
+ */
+export function ignoredAccessNote({ now = Date.now() } = {}) {
+  let d;
+  try { d = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch { return ''; }
+  if (!d || d.v !== 1 || !['trusted', 'full'].includes(d.level)) return '';
+  const g = getAccess({ now });
+  if (g.level !== 'ask') return '';
+  if (g.source === 'expired') return `Note: your "hallpass access ${d.level}" setting expired, so confirmations are back. Re-run it in your terminal to renew.`;
+  if (g.source === 'tampered') return `Note: your "hallpass access ${d.level}" setting is being ignored because its signature cannot be verified here (edited, made by another user, or the vault key is unreachable from this process). Re-run it in your terminal.`;
+  return '';
+}
+
 /** Person-only (the CLI enforces a terminal). Throws on bad input. */
 export function setAccess({ level, sites = [], ttlMs = null, includeCredentials = false, now = Date.now() }) {
   if (!LEVELS.includes(level)) throw new Error(`level must be one of: ${LEVELS.join(', ')}`);

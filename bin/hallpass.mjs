@@ -229,6 +229,10 @@ switch (cmd) {
       if (!sites.length) usage('usage: hallpass access trusted <site>...   e.g. hallpass access trusted play.google.com "*.supabase.com"');
       for (const s of sites) if (!normalizeSite(s)) usage('not a valid site: ' + s + ' (use a hostname like play.google.com, or *.example.com)');
     }
+    for (const s of sites) {
+      const n = normalizeSite(s), m = n && /^https:\/\/\*\.(.+)$/.exec(n);
+      if (m) process.stderr.write(`Note: ${n} covers subdomains only, not ${m[1]} itself. Add "${m[1]}" too if you use it.\n`);
+    }
     const include = !!v['include-credentials'];
     const where = level === 'full' ? 'EVERY site' : sites.map(normalizeSite).join(', ');
     process.stderr.write(`\nThis turns off the confirmation dialogs for risky clicks (publish, delete, pay, submit...) and file uploads on ${where}\n` +

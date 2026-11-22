@@ -12,8 +12,9 @@ import { Redactor } from './redact.mjs';
 import { profilesDir } from './paths.mjs';
 import { ask, resetOutcome, lastOutcome, explainNoApproval, approvalTimeoutSec } from './ui.mjs';
 import { audit } from './audit.mjs';
-import { bypasses, auditBypass } from './access.mjs';
+import { bypasses, auditBypass, ignoredAccessNote } from './access.mjs';
 import { safeUrl, parseOrigin } from './origin.mjs';
+import { siteGrantValid, writeSiteGrant } from './grants.mjs';
 import { vetUploads, describeFiles, screenshotCommand } from './upload.mjs';
 
 export const ALLOWED = new Set(['open', 'click', 'activate', 'dblclick', 'fill', 'type', 'press', 'keyboard', 'hover', 'focus', 'check', 'uncheck', 'select', 'scroll', 'scrollintoview', 'wait', 'snapshot', 'get', 'is', 'find', 'tab', 'back', 'forward', 'reload', 'dialog', 'drag', 'highlight', 'upload', 'screenshot']);
@@ -114,10 +115,9 @@ function labelFor(browser, t) {
 
 // ---- uploads ----
 export const uploadMode = () => { const m = (process.env.HALLPASS_UPLOAD || 'ask').toLowerCase(); return ['off', 'ask', 'allow'].includes(m) ? m : 'ask'; };
-const UPLOAD_GRANT_MS = 60 * 60 * 1000;
-const uploadGrants = new Map(); // origin -> expiry; lives in this process only (the long-running MCP server), never on disk
-// "Allow for 1 hour" on the click gate: one origin in one hallpass session, in this process only. Each use is still audited.
-const gateGrants = new Map(); // `${session}|${origin}` -> expiry
+// "Allow for 1 hour" grants are signed files on disk (src/grants.mjs), not memory: `hallpass do` is a new process per command.
+// Click gate: one origin in one hallpass session. Uploads: one origin (any session). Every use is still audited.
+const noteLine = () => { const n = ignoredAccessNote(); return n ? '\n\n' + n : ''; };
 const hostOf = (url) => { try { return new URL(url).hostname || ''; } catch { return ''; } };
 // null when the page has no real origin: no grant is then offered or honoured, so the person is always asked.
 export const gateGrantKey = (session, where) => { const o = parseOrigin(where); return o ? `${session}|${o}` : null; };
@@ -129,20 +129,22 @@ function authorizeUpload(b, session, command, approver) {
   const v = vetUploads(command.slice(2));
   if (v.error) { audit('upload', { session, decision: 'rejected', reason: v.error.slice(0, 120) }); return { error: 'Upload refused: ' + v.error }; }
   const where = safeUrl((b.run(['get', 'url'], { json: false, timeout: 15_000 }).stdout || '').trim());
-  const origin = parseOrigin(where) || where;
+  const realOrigin = parseOrigin(where), origin = realOrigin || where; // a grant needs a real origin
+  const canGrant = !!realOrigin;
   const names = v.files.map((f) => path.basename(f.path)).join(', ').slice(0, 200);
-  if (uploadMode() === 'ask' && !((uploadGrants.get(origin) || 0) > Date.now()) && bypasses('upload', { url: where })) {
+  if (uploadMode() === 'ask' && !siteGrantValid('upload', origin) && bypasses('upload', { url: where })) {
     auditBypass('upload', { session, files: names, url: where }); // waived by `hallpass access`; the files were vetted above
-  } else if (uploadMode() === 'ask' && !((uploadGrants.get(origin) || 0) > Date.now())) {
+  } else if (uploadMode() === 'ask' && !siteGrantValid('upload', origin)) {
     resetOutcome();
     const choice = approver({
       title: 'Hallpass: confirm file upload',
-      message: `Your AI tool wants to upload ${v.files.length} file${v.files.length > 1 ? 's' : ''} to:\n\n    ${where || 'the current page'}\n\n${describeFiles(v.files)}\n\nApprove only if you asked for this. "Allow for 1 hour" skips this question for ${origin || 'this site'} until then.`,
-      buttons: [{ id: 'deny', label: 'Deny' }, { id: 'hour', label: 'Allow for 1 hour' }, { id: 'once', label: 'Allow once' }],
+      message: `Your AI tool wants to upload ${v.files.length} file${v.files.length > 1 ? 's' : ''} to:\n\n    ${where || 'the current page'}\n\n${describeFiles(v.files)}\n\nApprove only if you asked for this. ${canGrant ? `
+"Allow for 1 hour" skips this question for uploads to ${origin} until then.` : ''}${noteLine()}`,
+      buttons: [{ id: 'deny', label: 'Deny' }, ...(canGrant ? [{ id: 'hour', label: 'Allow for 1 hour' }] : []), { id: 'once', label: 'Allow once' }],
       timeoutSec: approvalTimeoutSec(),
     });
     audit('upload', { session, files: names, url: where, decision: choice || lastOutcome()?.reason || 'deny' });
-    if (choice === 'hour') uploadGrants.set(origin, Date.now() + UPLOAD_GRANT_MS);
+    if (choice === 'hour' && canGrant) writeSiteGrant('upload', origin);
     else if (choice !== 'once') return { error: `Blocked: ${explainNoApproval('upload', hostOf(where))} Tell the user which file you wanted to upload and where.` };
   } else audit('upload', { session, files: names, url: where, decision: 'allowed' });
   return { command: ['upload', command[1], ...v.files.map((f) => f.path)] };
@@ -212,20 +214,20 @@ export function runBrowser({ session, command }, { approver = ask } = {}) {
       if (bypasses('gate', { url: where })) {
         // The person waived this dialog for this site (or everywhere) with `hallpass access trusted|full`. Still audited.
         auditBypass('gate', { session, verb: command[0], label: shown, url: where });
-      } else if (gateGrantKey(session, where) && (gateGrants.get(gateGrantKey(session, where)) || 0) > Date.now()) {
+      } else if (siteGrantValid('gate', gateGrantKey(session, where))) {
         audit('gate', { session, verb: command[0], label: shown, url: where, decision: 'allowed-grant' }); // inside a 1-hour grant
       } else {
         resetOutcome();
         const canGrant = !!gateGrantKey(session, where);
         const choice = approver({
           title: 'Hallpass: confirm action',
-          message: `Your AI tool wants to ${command[0]}:\n\n    ${shown}\n\non ${where || 'the current page'}\n\n${mode === 'all' ? 'Every click and keystroke action is gated.' : 'This looks irreversible or outward-facing (publish, delete, pay, submit, ...).'}\nApprove only if this is exactly what you asked for.${canGrant ? '\n"Allow for 1 hour" skips this question for every risky click on this site in this session until then.' : ''}`,
+          message: `Your AI tool wants to ${command[0]}:\n\n    ${shown}\n\non ${where || 'the current page'}\n\n${mode === 'all' ? 'Every click and keystroke action is gated.' : 'This looks irreversible or outward-facing (publish, delete, pay, submit, ...).'}\nApprove only if this is exactly what you asked for.${canGrant ? '\n"Allow for 1 hour" skips this question for every risky click on this site in this session until then.' : ''}${noteLine()}`,
           buttons: [{ id: 'deny', label: 'Deny' }, ...(canGrant ? [{ id: 'hour', label: 'Allow for 1 hour' }] : []), { id: 'once', label: 'Allow this action' }],
           timeoutSec: approvalTimeoutSec(),
         });
         const ok = choice === 'once' || (choice === 'hour' && canGrant); // never trust an 'hour' answer when no grant was offered
         audit('gate', { session, verb: command[0], label: shown, url: where, decision: ok ? (choice === 'hour' ? 'allowed-hour' : 'allowed') : (lastOutcome()?.reason === 'denied' || !lastOutcome() ? 'denied' : lastOutcome().reason) });
-        if (choice === 'hour' && canGrant) gateGrants.set(gateGrantKey(session, where), Date.now() + UPLOAD_GRANT_MS);
+        if (choice === 'hour' && canGrant) writeSiteGrant('gate', gateGrantKey(session, where));
         if (!ok) return { isError: true, text: `Blocked: ${explainNoApproval('action', hostOf(where))}` };
       }
     }

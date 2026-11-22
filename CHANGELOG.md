@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.6.3 (fix: "Allow for 1 hour" was forgotten between commands)
+
+Fixed
+- **"Allow for 1 hour" asked again on every action.** The click-gate and upload 1-hour grants were kept in memory, but `hallpass do` (what agents and subagents use) is a new process per command, so the grant vanished immediately and every risky click and every image upload prompted again (one dialog per Play Console image replacement). Grants are now HMAC-signed files in the state directory (same scheme as sign-in grants), shared by every process, scoped to one session + origin for clicks and one origin for uploads, valid for 1 hour, and still audited (`allowed-grant`). A hand-edited or forged grant file is ignored. With no vault key yet, grants cannot be signed and fall back to in-process memory.
+- The upload dialog no longer offers "Allow for 1 hour" when the page has no real origin (same rule the click dialog got in 1.6.2).
+- Tests: `test/grants.test.mjs` (persists across a real child process, scope, expiry, tamper).
+
+- **A `trusted` / `full` access setting that is not in force now says why.** When the setting has expired, or its signature cannot be verified from the running process (edited, another user, vault key unreachable), confirmations silently came back and it looked like the setting was ignored at random. The click and upload dialogs and the agent's "not approved" message now carry a one-line note ("your hallpass access trusted setting expired ... re-run it in your terminal").
+- `hallpass access trusted "*.example.com"` now warns that a wildcard covers subdomains only, not `example.com` itself.
+- Audit result: the only approval dialogs are the click gate, uploads and stored-login approval; all three honour `trusted`/`full`, read the signed setting on every call (so it holds across processes), and are covered by tests.
+
+Note: a click grant and an upload grant are separate on purpose (an upload sends a file off your machine), so one image replacement can still show one click dialog and one upload dialog the first time; after you pick "Allow for 1 hour" on each, neither asks again for an hour.
+
 ## 1.6.2 (fix: 1-hour click grant needs a real origin)
 
 Fixed

@@ -36,7 +36,7 @@ An agent that also has a general shell is not constrained by these limits (it ca
 
 | Property | How |
 |---|---|
-| Human-only approval | `--require-approval` shows a native dialog (WinForms / osascript / zenity). The agent cannot click it; with no GUI or no answer the result is **deny**. Verified by a test that answers the real dialog with a physical click. 1-hour grants are HMAC-signed with a key derived from the vault master key. |
+| Human-only approval | `--require-approval` shows a native dialog (WinForms / osascript / zenity). The agent cannot click it; with no GUI or no answer the result is **deny**. Verified by a test that answers the real dialog with a physical click. 1-hour grants (sign-in, click gate, upload) are HMAC-signed files on disk with a key derived from the vault master key, so they hold across commands but cannot be forged or extended by hand. |
 | Policy before decryption | Expiry, use limits and approval are checked before any secret is unsealed; they live in the entry's authenticated metadata. |
 | Lockout protection | A rejected password/TOTP disables automatic login for that entry (`credential_locked`) across processes until a person clears it. |
 | Action gate | In the MCP `browser` tool and `hallpass do`, controls whose label/aria-label/value/title match irreversible patterns (delete, publish, pay, submit, ...) need a native confirmation. Fail-closed. |
