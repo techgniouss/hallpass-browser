@@ -21,7 +21,7 @@ import { parseOrigin } from './origin.mjs';
 export { guardBrowser };
 import { profilesDir } from './paths.mjs';
 
-const VERSION = '1.6.2';
+const VERSION = '1.6.3';
 
 export const INSTRUCTIONS = `hallpass opens websites in a browser you can drive, and handles login safely.
 
