@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased (optional anonymous fetch through Obscura)
+
+Added
+- **`hallpass fetch <url>` / MCP `hallpass_fetch`**: a light, anonymous, read-only way to read a public `https://` page through [Obscura](https://github.com/h4ckf0r0day/obscura) without starting Chrome. Formats: `markdown` (default), `text`, `links`, `html`. Output is capped, wrapped in per-call random untrusted-content markers, and flagged `suspected_block` / `suspected_empty` when the page wants a login, a bot check or a real browser (the agent is told to use `hallpass open`, never to work around it).
+- **`hallpass obscura [--pin <path> | --unpin]`**: which Obscura binary may run. Pinning is terminal-only with a typed yes (like `doctor --repin`); there is no PATH or environment lookup. Without a pin, `fetch` answers `unavailable` (exit 3) and nothing else changes.
+- Hard limits by construction: fixed argument list (no stealth, proxy, user-agent, eval, storage, screenshot, output file or private-network flag), minimal child environment, scratch working directory, never the vault, a profile or cookies. Every fetch is audited (origin + path only).
+- Tests: `test/fetch.test.mjs` (argv, environment, markers and forged markers, caps, block/empty detection, failure and hang, audit, pin/unpin, CLI exit codes). Found and fixed on the way: a spawn that throws synchronously hit a not-yet-initialised timer.
+- `ab.mjs` now exports `readCfg` / `writeCfg` so the Obscura pin shares `config.json` with the agent-browser pin without overwriting it.
+
+- Checked against the real Obscura 0.2.7 (Windows x64 release): the fixed argument list works, public pages return clean text, 404s and DNS errors come back as `engine_error`. A short page that pairs a password prompt with sign-in wording (e.g. github.com/login) is now flagged `suspected_block`; a long docs page that merely mentions passwords is not.
+- Measured honestly on one Windows machine: Obscura answers in about 0.7 s from cold, where a cold Chrome start took about 4.4 s. Once Chrome is already running it is as fast or faster (about 1.2 s per page, against 2 s and 7 s for Obscura on two heavier pages). So the gain is mainly the first read of a task and lower memory, not raw speed; Obscura's markdown also keeps page navigation text, so it returns more than Chrome's body text.
+
+Not changed: logins, the vault, the click gate and everything in `hallpass open` / `hallpass do` still use agent-browser and Chrome.
+
 ## 1.6.3 (fix: "Allow for 1 hour" was forgotten between commands)
 
 Fixed

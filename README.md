@@ -125,6 +125,21 @@ hallpass open https://play.google.com/console      # the agent runs this; deep l
 | Login wall, no stored credential | a visible Chrome window opens; **you** log in (MFA, CAPTCHA, passkey, anything); tell the agent; it runs `hallpass resume`. Hallpass never types for you. The profile keeps the session. |
 | A stored credential matches the site | logs in headless, typing the password without ever showing it (TOTP included) |
 
+### Faster reads of public pages (optional, Obscura)
+
+For tasks that only need to **read** a public page (docs, a changelog, a status page), `hallpass fetch <url>` (MCP: `hallpass_fetch`) can use [Obscura](https://github.com/h4ckf0r0day/obscura), a small headless engine, instead of starting Chrome. It is opt-in and deliberately narrow:
+
+- **Anonymous and read-only.** Never logged in, no cookies, nothing typed or clicked, `https://` only. Pages behind a login still go through `hallpass open`.
+- **No evasion.** No stealth mode, proxy or user-agent change. A login wall or bot check comes back as `suspected_block` and the agent is told to hand over to you, not to get around it.
+- **You choose the binary.** Download the plain (not `-stealth`) build from the [official releases](https://github.com/h4ckf0r0day/obscura/releases), then in your own terminal: `hallpass obscura --pin <path-to-obscura>` (undo: `hallpass obscura --unpin`). Until then `hallpass fetch` just says `unavailable` and nothing changes.
+
+```console
+$ hallpass fetch https://example.com/docs --format markdown
+{"status":"ok","url":"https://example.com/docs","format":"markdown","bytes":1234,"truncated":false,"content":"<<<HALLPASS_PAGE ...>>> ..."}
+```
+
+Where it helps: the first read of a task (about 0.7 s, against about 4 s for a cold Chrome start) and lower memory use. Once Chrome is already running it is no faster. Obscura is a young third-party project and an independent engine, so some pages render differently from Chrome. Hallpass keeps Chrome for everything involving a login.
+
 ### Watching the browser (window mode)
 
 Say *"do it in a visible window"* or *"let me watch"* and the agent uses `--visible`. You can switch an open account between modes at any time.
