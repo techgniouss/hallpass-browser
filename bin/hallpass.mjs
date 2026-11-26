@@ -27,7 +27,7 @@ import { status as updateStatus, checkNow, runUpdate } from '../src/update.mjs';
 import { getAccess, setAccess, clearAccess, describeAccess, parseDuration, normalizeSite, DEFAULT_FULL_TTL } from '../src/access.mjs';
 import { parseRef, resolveRef, SecretUnavailable } from '../src/refs.mjs';
 import { serve } from '../src/mcp.mjs';
-import { fetchPage, obscuraStatus, pinObscura, unpinObscura, FORMATS } from '../src/fetch.mjs';
+import { fetchPage, obscuraStatus, obscuraHealth, pinObscura, unpinObscura, FORMATS } from '../src/fetch.mjs';
 import { setup, inspect as inspectRuntime, withLock, recordFailure } from '../src/setup.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -422,6 +422,7 @@ switch (cmd) {
     add('node >= 20', Number(process.versions.node.split('.')[0]) >= 20, process.versions.node);
     try { const bin = findBinary(); const rt = inspectRuntime(); add('chrome for agent-browser', rt.browser !== false, rt.browser === false ? 'not installed: run hallpass setup' : rt.browser ? 'installed' : 'could not tell (older/newer agent-browser)'); const r = spawnSync(bin, ['--version'], { encoding: 'utf8' }); const ver = /(\d+\.\d+)\.\d+/.exec(r.stdout || '')?.[1]; add('agent-browser', r.status === 0, `${(r.stdout || '').trim()} (pinned: ${bin})`); add('agent-browser compatibility', !(rt.outdated), ver === TESTED_AGENT_BROWSER ? `${ver}.x is the tested release line` : rt.outdated ? `agent-browser ${rt.version} is older than the ${TESTED_AGENT_BROWSER}.x line; on current Chrome its visible login window can lose the page. Run: hallpass setup` : `NOTE: hallpass was tested with ${TESTED_AGENT_BROWSER}.x; you have ${ver || 'unknown'}. It may work, but report anything odd`); } catch (e) { add('agent-browser', false, e.message); }
     try { const b = backend(); const k = masterKey({ create: false }); add('keystore', true, `${b.name}; master key ${k ? 'present' : 'not created yet (created on first "hallpass add")'}`); } catch (e) { add('keystore', false, e.message); }
+    { const o = obscuraHealth(); add('obscura (optional fetch)', o.ok, o.detail); }
     add('home dir', true, home());
     try { const c = verifyLog(); add('audit log', c.ok, c.ok ? `${c.entries} entries, chain intact` : `TAMPERED or damaged at entry ${c.broken_at}: ${c.reason}`); } catch (e) { add('audit log', false, e.message); }
     // env vars that weaken a safety control for whoever sets them (an agent can set them on its own command line)

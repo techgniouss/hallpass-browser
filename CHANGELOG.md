@@ -12,6 +12,11 @@ Added
 - Checked against the real Obscura 0.2.7 (Windows x64 release): the fixed argument list works, public pages return clean text, 404s and DNS errors come back as `engine_error`. A short page that pairs a password prompt with sign-in wording (e.g. github.com/login) is now flagged `suspected_block`; a long docs page that merely mentions passwords is not.
 - Measured honestly on one Windows machine: Obscura answers in about 0.7 s from cold, where a cold Chrome start took about 4.4 s. Once Chrome is already running it is as fast or faster (about 1.2 s per page, against 2 s and 7 s for Obscura on two heavier pages). So the gain is mainly the first read of a task and lower memory, not raw speed; Obscura's markdown also keeps page navigation text, so it returns more than Chrome's body text.
 
+- **robots.txt is always obeyed** (`--obey-robots`, not switchable): a page the site disallows for automated readers comes back as `blocked_by_robots` with a note to tell the user, and no suggestion to fetch it another way. Checked against the real binary (`github.com/search` is blocked, `example.com` is not).
+- **`hallpass doctor` checks Obscura**: not set up is fine (it is optional); a pin whose file is missing or that does not answer `--version` (for example Windows DLLs missing) is reported as a problem.
+
+- Self-review fixes: the result field is now `requested_url` (Obscura does not report the final address after a redirect, so `url` would have overstated where the text came from). Verified with the real binary that its SSRF guard refuses 127.0.0.1, 169.254.169.254, 10.x, localhost, [::1] and a redirect to a private address.
+
 Not changed: logins, the vault, the click gate and everything in `hallpass open` / `hallpass do` still use agent-browser and Chrome.
 
 ## 1.6.3 (fix: "Allow for 1 hour" was forgotten between commands)
