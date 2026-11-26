@@ -27,6 +27,7 @@ import { status as updateStatus, checkNow, runUpdate } from '../src/update.mjs';
 import { getAccess, setAccess, clearAccess, describeAccess, parseDuration, normalizeSite, DEFAULT_FULL_TTL } from '../src/access.mjs';
 import { parseRef, resolveRef, SecretUnavailable } from '../src/refs.mjs';
 import { serve } from '../src/mcp.mjs';
+import { fetchPage, obscuraStatus, obscuraHealth, pinObscura, unpinObscura, FORMATS } from '../src/fetch.mjs';
 import { setup, inspect as inspectRuntime, withLock, recordFailure } from '../src/setup.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -51,6 +52,7 @@ const HELP = `hallpass - agent logins with credentials the agent can use but not
                                             stop asking before risky clicks and uploads on these sites only
     hallpass access full [--for 4h | --forever] [--include-credentials]
                                             stop asking everywhere (expires after 4h unless you say otherwise)
+    hallpass obscura [--pin <path> | --unpin]  show / choose the Obscura binary that "hallpass fetch" may run (pinning: terminal only)
     hallpass access ask                     back to asking (the default).  hallpass access  shows the current level
 
   The agent runs these:
@@ -65,6 +67,10 @@ const HELP = `hallpass - agent logins with credentials the agent can use but not
                                             "ambiguous_account" (ask the person which). --as takes a stored credential's
                                             name, or the label of a saved browser login, or "default" for the site's unlabelled
                                             login. To ADD an account, give a new label and --new (a mistyped name is an error).
+    hallpass fetch <url> [--format markdown|text|links|html] [--timeout <sec>] [--max-bytes <n>]
+                                            OPTIONAL fast read of a public https page through Obscura: anonymous, never logged in,
+                                            no CAPTCHA/bot-check workarounds. Needs a one-time pin (below); else it says "unavailable".
+                                            A login wall or block comes back as suspected_block: use hallpass open instead.
     hallpass accounts [<url>]                every login hallpass has for a site (stored credentials AND saved browser
                                             logins), or for all sites without a URL. Use it when a site has several accounts.
     hallpass name-login <url> <name>         give a site's earlier, unnamed saved login a name (then --as <name>)
@@ -333,6 +339,29 @@ switch (cmd) {
     process.exit(r.isError ? 1 : 0);
     break;
   }
+  case 'fetch': {
+    const { values: v, positionals } = opts({ format: { type: 'string' }, timeout: { type: 'string' }, 'max-bytes': { type: 'string' } });
+    if (positionals.length !== 1) usage('usage: hallpass fetch <https-url> [--format ' + FORMATS.join('|') + '] [--timeout <sec>] [--max-bytes <n>]');
+    const r = await fetchPage(positionals[0], { format: v.format || 'markdown', timeoutSec: v.timeout, maxBytes: v['max-bytes'] });
+    out(r, r.status === 'ok' ? 0 : r.status === 'unavailable' ? 3 : 1);
+    break;
+  }
+  case 'obscura': {
+    // Which program "hallpass fetch" runs is the person's choice (like `doctor --repin` for agent-browser): a terminal and a typed yes.
+    const { values: v } = opts({ pin: { type: 'string' }, unpin: { type: 'boolean' } }, false);
+    if (v.pin && v.unpin) usage('choose --pin <path> or --unpin, not both');
+    if (!v.pin && !v.unpin) { out({ status: 'ok', ...obscuraStatus() }); break; }
+    if (!isTTY()) usage('hallpass obscura --pin/--unpin needs a real terminal: it decides which program fetches pages for agents, so a person must choose it.');
+    if (v.unpin) { safe(() => unpinObscura()); audit('obscura-unpin', {}); out({ status: 'unpinned', ...obscuraStatus() }); break; }
+    const file = path.resolve(v.pin);
+    process.stderr.write(`\nObscura at ${file}\n"hallpass fetch" will run this program (first with --version, to check it), anonymously, for any https URL an agent asks to read.\nIt never receives your logins, cookies or files. Only pin a copy you downloaded from the official releases. Undo: hallpass obscura --unpin\n\n`);
+    if ((await ask('Type yes to allow it: ')).trim().toLowerCase() !== 'yes') usage('cancelled');
+    let pinned;
+    try { pinned = pinObscura(file); } catch (e) { usage(e.message); }
+    audit('obscura-pin', { path: pinned.path, version: pinned.version });
+    out({ status: 'pinned', ...pinned });
+    break;
+  }
   case 'sessions': out({ sessions: safe(() => listSessions()) }); break;
   case 'prune': {
     const { values: v } = opts({ 'older-than': { type: 'string' }, 'dry-run': { type: 'boolean' } }, false);
@@ -393,6 +422,7 @@ switch (cmd) {
     add('node >= 20', Number(process.versions.node.split('.')[0]) >= 20, process.versions.node);
     try { const bin = findBinary(); const rt = inspectRuntime(); add('chrome for agent-browser', rt.browser !== false, rt.browser === false ? 'not installed: run hallpass setup' : rt.browser ? 'installed' : 'could not tell (older/newer agent-browser)'); const r = spawnSync(bin, ['--version'], { encoding: 'utf8' }); const ver = /(\d+\.\d+)\.\d+/.exec(r.stdout || '')?.[1]; add('agent-browser', r.status === 0, `${(r.stdout || '').trim()} (pinned: ${bin})`); add('agent-browser compatibility', !(rt.outdated), ver === TESTED_AGENT_BROWSER ? `${ver}.x is the tested release line` : rt.outdated ? `agent-browser ${rt.version} is older than the ${TESTED_AGENT_BROWSER}.x line; on current Chrome its visible login window can lose the page. Run: hallpass setup` : `NOTE: hallpass was tested with ${TESTED_AGENT_BROWSER}.x; you have ${ver || 'unknown'}. It may work, but report anything odd`); } catch (e) { add('agent-browser', false, e.message); }
     try { const b = backend(); const k = masterKey({ create: false }); add('keystore', true, `${b.name}; master key ${k ? 'present' : 'not created yet (created on first "hallpass add")'}`); } catch (e) { add('keystore', false, e.message); }
+    { const o = obscuraHealth(); add('obscura (optional fetch)', o.ok, o.detail); }
     add('home dir', true, home());
     try { const c = verifyLog(); add('audit log', c.ok, c.ok ? `${c.entries} entries, chain intact` : `TAMPERED or damaged at entry ${c.broken_at}: ${c.reason}`); } catch (e) { add('audit log', false, e.message); }
     // env vars that weaken a safety control for whoever sets them (an agent can set them on its own command line)

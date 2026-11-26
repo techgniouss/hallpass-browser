@@ -70,17 +70,15 @@ No credential was ever given to the agent. The browser profile keeps the session
 | 🧹 **Output redaction** | Secrets are scrubbed from what flows back to the model; password fields refuse to be read. |
 | 🔌 **Works everywhere** | A CLI that prints JSON, an MCP server, and native plugins for Claude Code, Codex and Gemini CLI. |
 
-Built on top of [agent-browser](https://github.com/vercel-labs/agent-browser), which drives Chrome.
-
 > **Status: beta.** Read [SECURITY.md](SECURITY.md) (threat model, what is and is not protected) before trusting it with anything important. It has not been independently audited.
 
 ## Quick start (about two minutes)
 
-Requirements: **Node 20+**. Nothing else: agent-browser is a dependency and Chrome (about 150 MB, once) is fetched automatically.
+Requirements: **Node 20+**. Nothing else: the browser tooling and Chrome (about 150 MB, once) are fetched automatically.
 
 ```bash
 npm i -g hallpass-browser      # gives you the `hallpass` command
-hallpass doctor                # checks Node, agent-browser, keystore
+hallpass doctor                # checks Node, the browser tooling, keystore
 hallpass init --yes            # detects your AI tools and installs the instructions
 ```
 
@@ -124,6 +122,16 @@ hallpass open https://play.google.com/console      # the agent runs this; deep l
 | You logged in before (or the page needs no login) | opens headless on that site's saved profile; no credentials involved |
 | Login wall, no stored credential | a visible Chrome window opens; **you** log in (MFA, CAPTCHA, passkey, anything); tell the agent; it runs `hallpass resume`. Hallpass never types for you. The profile keeps the session. |
 | A stored credential matches the site | logs in headless, typing the password without ever showing it (TOTP included) |
+
+### Quick reads of public pages (optional)
+
+For tasks that only need to **read** a public page (docs, a changelog, a status page), `hallpass fetch <url>` (MCP: `hallpass_fetch`) can skip starting Chrome. It needs a one-time opt-in and is deliberately narrow:
+
+- **Anonymous and read-only.** Never logged in, no cookies, nothing typed or clicked, `https://` only. Anything behind a login still goes through `hallpass open`.
+- **No evasion.** `robots.txt` is always obeyed (`blocked_by_robots`), and a login wall or bot check comes back as `suspected_block` so the agent hands over to you instead of working around it.
+- **You choose the engine.** It uses [Obscura](https://github.com/h4ckf0r0day/obscura), a young third-party project, so some pages render differently from Chrome. Download the plain (not `-stealth`) build from its releases, then in your own terminal: `hallpass obscura --pin <path-to-obscura>` (undo: `hallpass obscura --unpin`). Until then `hallpass fetch` says `unavailable` and nothing changes.
+
+It mainly helps the first read of a task (no browser start-up) and keeps memory use low; once Chrome is already running it is no faster.
 
 ### Watching the browser (window mode)
 
@@ -248,7 +256,7 @@ Housekeeping: `hallpass sessions`, `hallpass prune --older-than 30d`, `hallpass 
 
 **I have two accounts on one site. Which one does the agent use?** It asks you which one, then uses `hallpass open <url> --as <name>`. See [Several accounts](#several-accounts-on-one-site).
 
-**Which sites work?** Anything agent-browser can open. Sign-in detection is heuristic (it ships a 28-page corpus in 7 languages), so when it guesses wrong it asks you instead of failing.
+**Which sites work?** Any site Chrome can open. Sign-in detection is heuristic (it ships a 28-page corpus in 7 languages), so when it guesses wrong it asks you instead of failing.
 
 ## Development and tests
 
@@ -281,5 +289,7 @@ Issues and pull requests are welcome, especially: **macOS and Linux testing**, *
 If Hallpass saves you from pasting a password into a chat, a ⭐ helps other people find it.
 
 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) · [CHANGELOG.md](CHANGELOG.md) · MIT licensed ([LICENSE](LICENSE)).
+
+Thanks to [agent-browser](https://github.com/vercel-labs/agent-browser) (browser control) and, optionally, [Obscura](https://github.com/h4ckf0r0day/obscura) (quick public reads).
 
 Use it only on accounts you own and where automation is permitted by the site's terms. Hallpass does not solve CAPTCHAs or bypass bot protection: it hands them to you.

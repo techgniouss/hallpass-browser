@@ -16,7 +16,9 @@ export const runtimeDir = () => path.join(home(), 'runtime');
 // `PATH=/tmp/fake:$PATH hallpass login x` cannot redirect it. Re-pinning (after moving/reinstalling) is a human action:
 // `hallpass doctor --repin`.
 const cfgFile = () => path.join(home(), 'config.json');
-const readCfg = () => { try { return JSON.parse(fs.readFileSync(cfgFile(), 'utf8')); } catch { return {}; } };
+export const readCfg = () => { try { return JSON.parse(fs.readFileSync(cfgFile(), 'utf8')); } catch { return {}; } };
+/** Merge `patch` into config.json (0600), or with {replace:true} write `patch` as the whole file. Other settings (agentBrowser pin, browser) are kept. */
+export const writeCfg = (patch, { replace = false } = {}) => fs.writeFileSync(cfgFile(), JSON.stringify(replace ? patch : { ...readCfg(), ...patch }), { mode: 0o600 });
 const pinned = () => { const p = readCfg().agentBrowser; return typeof p === 'string' && fs.existsSync(p) ? p : null; };
 const pin = (p, { human = false } = {}) => { try { fs.writeFileSync(cfgFile(), JSON.stringify({ ...readCfg(), agentBrowser: p, agentBrowserPinnedBy: human ? 'person' : 'auto' }), { mode: 0o600 }); } catch { /* best effort */ } };
 export const pinnedByHuman = () => readCfg().agentBrowserPinnedBy === 'person';

@@ -106,7 +106,7 @@ test('MCP: initialize advertises tools + instructions; no tool can read or write
   assert.match(init.result.instructions, /Never ask the user to paste/);
   const { tools } = (await rpc('tools/list')).result;
   const names = tools.map((t) => t.name);
-  assert.deepEqual(names.sort(), ['browser', 'browser_screenshot', 'hallpass_accounts', 'hallpass_list', 'hallpass_access', 'hallpass_logout', 'hallpass_name_login', 'hallpass_open', 'hallpass_request_credential', 'hallpass_resume', 'hallpass_status', 'hallpass_version'].sort());
+  assert.deepEqual(names.sort(), ['browser', 'browser_screenshot', 'hallpass_fetch', 'hallpass_accounts', 'hallpass_list', 'hallpass_access', 'hallpass_logout', 'hallpass_name_login', 'hallpass_open', 'hallpass_request_credential', 'hallpass_resume', 'hallpass_status', 'hallpass_version'].sort());
   const schemaText = JSON.stringify(tools);
   assert.ok(!/password|secret|totp|reveal|export/i.test(names.join(' ')), 'no secret-handling tool names');
   assert.ok(!/"(password|secret|username|token)"\s*:/.test(schemaText), 'no secret-bearing parameters');
@@ -149,4 +149,9 @@ test('MCP: errors are reported in-band, stdout stays clean JSON-RPC', async () =
   const bad = await rpc('no/such/method');
   assert.equal(bad.error.code, -32601);
   assert.deepEqual(json(await call('hallpass_list', {})), { entries: [] });
+  // optional Obscura fetch: bad input is an error, and with nothing pinned it is "unavailable" (not an error), pointing back at hallpass_open
+  const badFetch = await call('hallpass_fetch', { url: 'http://example.com' });
+  assert.equal(badFetch.isError, true); assert.equal(json(badFetch).reason, 'invalid_url');
+  const noFetch = await call('hallpass_fetch', { url: 'https://example.com/' });
+  assert.equal(noFetch.isError, false); assert.equal(json(noFetch).status, 'unavailable'); assert.match(json(noFetch).fallback, /hallpass open/);
 });

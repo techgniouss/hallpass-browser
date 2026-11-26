@@ -18,10 +18,11 @@ import { accountsFor, allAccounts } from './accounts.mjs';
 import { describeAccess } from './access.mjs';
 import { status as updateStatus, refreshIfStale } from './update.mjs';
 import { parseOrigin } from './origin.mjs';
+import { fetchPage } from './fetch.mjs';
 export { guardBrowser };
 import { profilesDir } from './paths.mjs';
 
-const VERSION = '1.6.3';
+const VERSION = '1.7.0';
 
 export const INSTRUCTIONS = `hallpass opens websites in a browser you can drive, and handles login safely.
 
@@ -37,6 +38,7 @@ WORKFLOW
   * status "logged_in": use the returned "session" with the "browser" tool (start with command ["snapshot","-i"]).
   * status "needs_human": a Chrome window is open on a login wall / CAPTCHA / MFA. Tell the user plainly what to do in that window, WAIT for their reply, then call hallpass_resume with the returned "name". Do not poll.
   * status "failed": read "reason" and "detail"; do not loop. Reason "setting_up" is the exception: hallpass is installing its browser components on first run, so tell the user, wait about a minute, and call hallpass_open once more.
+- To only READ a public page (docs, changelog, status page) you may try hallpass_fetch first: faster, no browser window. It is anonymous and read-only. "unavailable", suspected_block, suspected_empty or an error: switch to hallpass_open; never retry or look for a way around a block.
 - A stored credential matching the site is used automatically (headless, you never see it). Otherwise the user logs in themselves in the visible window, and the saved profile makes later opens instant.
 - If hallpass_open shows a login wall and the user would like hands-free logins, call hallpass_request_credential with the site's login URL: a one-time form opens in THEIR browser, they type the login, you never see it. Then wait for their reply and call hallpass_open again.
 - A site can have several accounts (Play Console with two Google logins, GitHub personal + work). hallpass_accounts with the site URL lists every login hallpass knows for it (stored credentials and saved browser logins; names and masked users only). If more than one exists, hallpass_open answers reason "ambiguous_account" with the choices: NEVER pick one yourself. Show the user the list (the "description" of each), ask which, then call hallpass_open again with "as" set to their choice. If the user already named the account in their request ("my work account") and exactly one choice matches, use it; if unsure, ask.
@@ -63,6 +65,18 @@ const TOOLS = [
         new: { type: 'boolean', description: 'with "as": the user wants to ADD a new account with that label (they sign in in the window). Without it an unknown label is an error, so a typo never creates an account.' },
         as: { type: 'string', description: 'which account on this site: the name of a stored credential, a short label for a saved browser login (a new label starts a new account), or "default" for the site\'s unlabelled login. Required when the site has several accounts (see hallpass_accounts). Ask the user; do not guess.' },
         timeout: { type: 'number', description: 'seconds to wait for the page/login to settle (default 30)' },
+      },
+    },
+  },
+  {
+    name: 'hallpass_fetch',
+    description: 'OPTIONAL fast, light READ of a public https page (docs, changelog, status page) without starting Chrome, via Obscura. Anonymous: never logged in, no cookies, nothing typed or clicked, no CAPTCHA/bot-check workarounds. Returns the page text between untrusted-content markers. Status "unavailable" means the user has not set Obscura up: use hallpass_open instead. If the result has suspected_block or suspected_empty, the page needs a login or a full browser: use hallpass_open, do not retry. Not for anything behind a login.',
+    inputSchema: {
+      type: 'object', required: ['url'], additionalProperties: false,
+      properties: {
+        url: { type: 'string', description: 'https URL to read' },
+        format: { type: 'string', enum: ['markdown', 'text', 'links', 'html'], description: 'markdown (default) is best for reading; links lists the page\'s links; html only when you need markup' },
+        max_bytes: { type: 'number', description: 'cap on returned text (default 200000)' },
       },
     },
   },
@@ -179,6 +193,7 @@ export async function callTool(name, a = {}) {
       }
       return text(r, r.status === 'failed');
     }
+    case 'hallpass_fetch': { const r = await fetchPage(a.url, { format: a.format || 'markdown', maxBytes: a.max_bytes }); return text(r, r.status === 'failed'); }
     case 'hallpass_access': return text(describeAccess());
     case 'hallpass_version': { const u = updateStatus(); return text({ ...u, ...(u.update_available ? { next: `Tell the user ${u.latest} is available (they have ${u.current}) and ask whether they want to update. They run: hallpass update  (or ${u.install.command}). Do not run it yourself.` } : {}) }); }
     case 'hallpass_name_login': { const r = nameLogin(String(a.url || ''), a.label); return text(r, r.status === 'failed'); }
