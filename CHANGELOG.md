@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (optional anonymous fetch through Obscura)
+## 1.7.0 (optional anonymous fetch through Obscura)
 
 Added
 - **`hallpass fetch <url>` / MCP `hallpass_fetch`**: a light, anonymous, read-only way to read a public `https://` page through [Obscura](https://github.com/h4ckf0r0day/obscura) without starting Chrome. Formats: `markdown` (default), `text`, `links`, `html`. Output is capped, wrapped in per-call random untrusted-content markers, and flagged `suspected_block` / `suspected_empty` when the page wants a login, a bot check or a real browser (the agent is told to use `hallpass open`, never to work around it).

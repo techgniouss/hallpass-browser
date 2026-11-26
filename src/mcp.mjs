@@ -22,7 +22,7 @@ import { fetchPage } from './fetch.mjs';
 export { guardBrowser };
 import { profilesDir } from './paths.mjs';
 
-const VERSION = '1.6.3';
+const VERSION = '1.7.0';
 
 export const INSTRUCTIONS = `hallpass opens websites in a browser you can drive, and handles login safely.
 
