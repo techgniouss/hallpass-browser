@@ -65,6 +65,7 @@ No credential was ever given to the agent. The browser profile keeps the session
 | 🔑 **Automatic TOTP** | Authenticator codes are generated on the fly, never shown. |
 | 🛑 **Irreversible-action gate** | Delete / Publish / Pay / Submit-type clicks need a native confirmation from you, not the model. Turn the dialogs down per site (`trusted`) or everywhere (`full`) when you want less friction, from your own terminal only. |
 | 👥 **Several accounts per site** | Two Google logins on Play Console, personal and work GitHub: each is separate, and the agent asks you which one instead of guessing. |
+| 🛤️ **Parallel lanes** | `--lane <id>` runs a second browser on the same login (own session, copied profile), so two tasks, such as publishing two apps, do not collide. |
 | 👀 **Watch mode** | `--visible` shows the browser while the agent works, and still signs in for you. |
 | 🧾 **Tamper-evident audit log** | Hash-chained record of what agents did. No secrets in it. `hallpass log --verify` |
 | 🧹 **Output redaction** | Secrets are scrubbed from what flows back to the model; password fields refuse to be read. |
@@ -217,6 +218,7 @@ Hallpass tells you when a newer version is published, and lets you decide.
 | Upload approval | Each file upload is vetted (types, no keys or config folders) and confirmed | default; `HALLPASS_UPLOAD=off` disables uploads |
 | Read-only server | Observation only | `HALLPASS_READONLY=1` in the MCP client config |
 | Several accounts | Never guesses which login to use; saved logins are separate browser profiles | automatic; see [Several accounts](#several-accounts-on-one-site) |
+| Parallel lanes | A lane has its own session and a throwaway copy of the login's profile; the credential, approvals and use limits are shared, and a rejected password in any lane locks the login | `--lane <id>`; see [Parallel work](#parallel-work-on-one-account-lanes) |
 | Audit log | Hash-chained record of what agents did, including every dialog an access level skipped; no secrets | `hallpass log`, `hallpass log --verify` |
 | Password readback guard | Typed secrets are cleared after typing; the MCP tool refuses to read password fields | always on |
 | Backup / move machines | Passphrase-encrypted export/import | `hallpass export file` / `import file` (terminal only) |
@@ -260,6 +262,8 @@ Housekeeping: `hallpass sessions`, `hallpass prune --older-than 30d`, `hallpass 
 
 **I have two accounts on one site. Which one does the agent use?** It asks you which one, then uses `hallpass open <url> --as <name>`. See [Several accounts](#several-accounts-on-one-site).
 
+**Can two tasks use the same account at the same time?** Yes: give each its own lane, `hallpass open <url> --as <name> --lane <id>`. See [Parallel work](#parallel-work-on-one-account-lanes).
+
 **Which sites work?** Any site Chrome can open. Sign-in detection is heuristic (it ships a 28-page corpus in 7 languages), so when it guesses wrong it asks you instead of failing.
 
 ## Development and tests
@@ -269,6 +273,7 @@ git clone https://github.com/techgniouss/hallpass-browser && cd hallpass-browser
 npm install
 npm test              # no browser: crypto/vault, TOTP (RFC 6238), origins, redaction, policy, audit chain, references, credential form, export/import, trust, packaging
 npm run test:browser  # real Chrome: logins, hand-offs, MCP server, action gate, 28-page detection corpus (opens a visible window or two)
+npm run test:lanes    # real Chrome: a stored credential plus two parallel lanes (also part of test:browser)
 npm run test:dialog   # Windows: the real native approval dialog, answered by clicks and keypresses
 npm run test:all
 ```
@@ -284,6 +289,7 @@ Everything runs against local mock sites. The detection corpus is structural re-
 - **Access levels remove the pop-ups, which are the main defence against a web page that tries to make the agent click "Delete"**. Use `trusted` with named sites and a time limit rather than `full --forever`. Like the rest of the gate they stop a prompt-injected agent, not a hostile process running as you: a shell agent can still call `agent-browser` directly.
 - The **action gate** is a heuristic on labels: it catches common dangerous buttons, not every one, and a shell agent can bypass it by calling `agent-browser` directly.
 - `www.example.com` and `example.com` keep separate saved logins (they always have), and a local dev server on any port shares one saved login per hostname; use labels to tell accounts apart.
+- A **lane** starts as a copy of the login's browser files. On Windows, Chrome holds its cookie file while the main browser is open, so the copy can fail and the lane starts signed out (the result says `lane_seeded: false`); close the main browser first. Two lanes acting on the same app at once still conflict, and a site that limits concurrent sessions per account may sign one out.
 - Vaults are bound to one OS account; move machines with `export` / `import`.
 
 ## Contributing
