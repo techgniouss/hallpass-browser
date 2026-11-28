@@ -18,6 +18,24 @@ export const LABEL_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 export const validLabel = (l) => typeof l === 'string' && LABEL_RE.test(l);
 
 const MAX_KEY = 63;
+
+// A LANE is an extra, parallel browser for the same login: same credential or saved login, its own session and its own profile
+// folder, so two tasks can drive the same account at once without fighting over one Chrome profile.
+//   <key>_l_<id>   e.g. play-console_l_app2, site-play.google.com__work_l_2
+// "_" cannot occur in a host or a label, and a lane id has no "_", so the last "_l_" always splits base from id.
+export const LANE_RE = /^[a-z0-9][a-z0-9-]{0,15}$/;
+export const validLane = (l) => typeof l === 'string' && LANE_RE.test(l);
+export const laneKey = (key, lane) => {
+  if (!validLane(lane)) throw new Error('lane must be lowercase letters, digits and - (max 16)');
+  const k = `${key}_l_${lane}`;
+  if (k.length > MAX_KEY) throw new Error(`lane name too long: "${k}" would be over ${MAX_KEY} characters; use a shorter lane id`);
+  return k;
+};
+/** "play-console_l_app2" -> { base: "play-console", lane: "app2" }; not a lane key -> null. */
+export function splitLane(key) {
+  const m = typeof key === 'string' ? /^(.+)_l_([a-z0-9][a-z0-9-]{0,15})$/.exec(key) : null;
+  return m ? { base: m[1], lane: m[2] } : null;
+}
 const hostPart = (url) => ('site-' + new URL(url).hostname).replace(/[^a-z0-9.-]/gi, '-').toLowerCase();
 
 /** Profile/session key for a site with no vault entry. `label` (or none / "default") picks which saved login on that site. */
@@ -75,7 +93,7 @@ const profileAccount = (key) => {
 function savedProfiles(url) {
   let ents = [];
   try { ents = fs.readdirSync(profilesDir(), { withFileTypes: true }); } catch { /* none yet */ }
-  return ents.filter((e) => e.isDirectory() && keyIsForUrl(e.name, url)).map((e) => profileAccount(e.name))
+  return ents.filter((e) => e.isDirectory() && !splitLane(e.name) && keyIsForUrl(e.name, url)).map((e) => profileAccount(e.name))
     .sort((a, b) => (a.label === null) - (b.label === null) || a.as.localeCompare(b.as)); // default last, labels alphabetical
 }
 
@@ -127,7 +145,7 @@ export function allAccounts() {
   try { ents = fs.readdirSync(profilesDir(), { withFileTypes: true }); } catch { /* none yet */ }
   for (const e of ents) {
     const p = parseSiteKey(e.name);
-    if (!e.isDirectory() || !p) continue;
+    if (!e.isDirectory() || !p || splitLane(e.name)) continue; // lanes are scratch copies, not accounts
     site(p.hostKey.slice('site-'.length)).push(profileAccount(e.name));
   }
   return [...sites.values()].sort((a, b) => a.host.localeCompare(b.host));

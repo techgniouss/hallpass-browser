@@ -1,6 +1,6 @@
 {
   "name": "hallpass-browser",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "Open any website in a browser your AI agent can drive and log in safely: credentials the agent can use but never read, with a hand-off to you for CAPTCHA/MFA. CLI, MCP server, and plugins for Claude Code, Codex, Gemini CLI and Antigravity.",
   "keywords": [
     "ai-agent",
@@ -48,15 +48,16 @@
     "provenance": true
   },
   "scripts": {
-    "test": "node --test test/unit.test.mjs test/accounts.test.mjs test/access.test.mjs test/update.test.mjs test/audit.test.mjs test/refs.test.mjs test/request.test.mjs test/ops.test.mjs test/trust.test.mjs test/packaging.test.mjs test/setup.test.mjs test/approval-reasons.test.mjs test/grants.test.mjs test/access-note.test.mjs test/fetch.test.mjs",
+    "test": "node --test test/unit.test.mjs test/accounts.test.mjs test/access.test.mjs test/update.test.mjs test/audit.test.mjs test/refs.test.mjs test/request.test.mjs test/ops.test.mjs test/trust.test.mjs test/packaging.test.mjs test/setup.test.mjs test/approval-reasons.test.mjs test/grants.test.mjs test/access-note.test.mjs test/fetch.test.mjs test/lane.test.mjs",
     "test:e2e": "node --test --test-concurrency=1 test/e2e.test.mjs",
     "test:mcp": "node --test --test-concurrency=1 test/mcp.test.mjs",
     "test:accounts": "node --test --test-concurrency=1 test/accounts-e2e.test.mjs",
+    "test:lanes": "node --test --test-concurrency=1 test/lane-e2e.test.mjs",
     "test:gate": "node --test --test-concurrency=1 test/gate.test.mjs",
     "test:upload": "node --test --test-concurrency=1 test/upload.test.mjs",
     "test:detect": "node --test --test-concurrency=1 test/detect.test.mjs",
     "test:dialog": "node --test --test-concurrency=1 test/dialog.test.mjs",
-    "test:browser": "node --test --test-concurrency=1 test/e2e.test.mjs test/accounts-e2e.test.mjs test/mcp.test.mjs test/gate.test.mjs test/upload.test.mjs test/detect.test.mjs",
+    "test:browser": "node --test --test-concurrency=1 test/e2e.test.mjs test/accounts-e2e.test.mjs test/lane-e2e.test.mjs test/mcp.test.mjs test/gate.test.mjs test/upload.test.mjs test/detect.test.mjs",
     "test:all": "npm test && npm run test:browser && npm run test:dialog",
     "prepublishOnly": "npm test",
     "postinstall": "node bin/postinstall.mjs"

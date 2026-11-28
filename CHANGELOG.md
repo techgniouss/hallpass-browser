@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.0 (parallel lanes: one login, several browsers at once)
+
+Added
+- **`hallpass open <url> --lane <id>` (MCP `lane`; also `hallpass login <name> --lane <id>`)**: a parallel browser for the SAME login. Before this, one login meant one session (`hp-<name>`) and one Chrome profile folder, so two tasks on one account (for example publishing two apps to Play Console) fought over the same browser and profile lock. A lane has its own session and profile folder, `<key>_l_<id>`, and every later call uses the returned `session`.
+- A new lane **starts as a copy of the login's profile** (cookies and storage, minus Chrome's lock files and caches), so it is signed in from the first command. If the copy is not clean (the login was never made, or Chrome still holds the cookie file open, as it does on Windows while the main browser runs) the lane starts empty and the result says so (`lane_seeded: false`, `lane_note`): a stored credential then signs in by itself, otherwise the person signs in. Close the main browser first (`hallpass logout <name>`) to make the copy reliable.
+- Same credential, same rules: the vault entry, expiry, use limits and approval dialogs are the credential's, shared by all lanes. A password rejected in a lane locks the login for every lane. The click-gate and upload "Allow for 1 hour" grants are per session, so each lane asks for its own.
+- Lanes are throwaway: `hallpass logout <lane_key>` (MCP `hallpass_logout`) closes a lane and always removes its profile copy; the login it came from is untouched. `hallpass sessions` lists them as `kind: "lane"` with `lane_of`; `prune` clears forgotten ones. Lanes never appear as accounts, so they do not trigger `ambiguous_account`.
+- Credential names ending in `_l_<id>` are reserved for lanes. Lane ids: lowercase letters, digits and `-`, max 16; the whole key must fit 63 characters.
+- Tests: `test/lane.test.mjs` (keys, seeding, listing, cleanup) and `test/lane-e2e.test.mjs` (real Chrome: a stored credential still logs in with no lane, two lanes run beside it signed in from the copy, closing one leaves the rest alone; `npm run test:lanes`).
+
 ## 1.7.0 (optional anonymous fetch through Obscura)
 
 Added

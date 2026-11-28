@@ -56,7 +56,7 @@ const HELP = `hallpass - agent logins with credentials the agent can use but not
     hallpass access ask                     back to asking (the default).  hallpass access  shows the current level
 
   The agent runs these:
-    hallpass open <url> [--headed|--visible|--headless] [--as <name>] [--new]
+    hallpass open <url> [--headed|--visible|--headless] [--as <name>] [--new] [--lane <id>]
                                             open ANY site. Stored credential for its origin -> headless login.
                                             None -> headless on a saved profile; if a login wall appears, a visible
                                             window opens and the person logs in. --headed: visible window, the person logs in
@@ -67,6 +67,9 @@ const HELP = `hallpass - agent logins with credentials the agent can use but not
                                             "ambiguous_account" (ask the person which). --as takes a stored credential's
                                             name, or the label of a saved browser login, or "default" for the site's unlabelled
                                             login. To ADD an account, give a new label and --new (a mistyped name is an error).
+                                            --lane <id>: a PARALLEL browser for the same login (own session + profile, copied from the
+                                            login so it starts signed in). Use it to run two tasks on one account at once.
+                                            Close it with: hallpass logout <lane_key from the result>  (lanes are removed when closed).
     hallpass fetch <url> [--format markdown|text|links|html] [--timeout <sec>] [--max-bytes <n>]
                                             OPTIONAL fast read of a public https page through Obscura: anonymous, never logged in,
                                             no CAPTCHA/bot-check workarounds. Needs a one-time pin (below); else it says "unavailable".
@@ -76,7 +79,7 @@ const HELP = `hallpass - agent logins with credentials the agent can use but not
     hallpass name-login <url> <name>         give a site's earlier, unnamed saved login a name (then --as <name>)
     hallpass list                            names, URLs, approved origins (no secrets)
     hallpass show <name>                     metadata for one entry
-    hallpass login <name> [--headed|--headless] [--wait <sec>] [--manual] [--timeout <sec>]
+    hallpass login <name> [--headed|--headless] [--lane <id>] [--wait <sec>] [--manual] [--timeout <sec>]
     hallpass resume <name> [--timeout <sec>] continue after a person solved a CAPTCHA / MFA
     hallpass status <name>
     hallpass logout <name> [--wipe]          close the browser (--wipe also deletes its profile)
@@ -284,18 +287,18 @@ switch (cmd) {
     break;
   }
   case 'login': {
-    const { values: v, positionals } = opts({ headed: { type: 'boolean' }, headless: { type: 'boolean' }, manual: { type: 'boolean' }, wait: { type: 'string' }, timeout: { type: 'string' } });
+    const { values: v, positionals } = opts({ headed: { type: 'boolean' }, headless: { type: 'boolean' }, manual: { type: 'boolean' }, lane: { type: 'string' }, wait: { type: 'string' }, timeout: { type: 'string' } });
     const name = needName(positionals);
     if (v.headed && v.headless) usage('choose --headed or --headless, not both');
-    exitFor(await login(name, { headed: v.headless ? false : v.headed ? true : undefined, manual: v.manual, wait: v.wait && Number(v.wait), timeout: v.timeout && Number(v.timeout) }).catch((e) => ({ status: 'failed', reason: 'error', detail: e.message })));
+    exitFor(await login(name, { lane: v.lane, headed: v.headless ? false : v.headed ? true : undefined, manual: v.manual, wait: v.wait && Number(v.wait), timeout: v.timeout && Number(v.timeout) }).catch((e) => ({ status: 'failed', reason: 'error', detail: e.message })));
     break;
   }
   case 'open': {
-    const { values: v, positionals } = opts({ headed: { type: 'boolean' }, headless: { type: 'boolean' }, visible: { type: 'boolean' }, new: { type: 'boolean' }, as: { type: 'string' }, wait: { type: 'string' }, timeout: { type: 'string' } });
-    if (!positionals[0]) usage('usage: hallpass open <url> [--headed|--visible|--headless] [--as <credential-name | label | default>] [--new]');
+    const { values: v, positionals } = opts({ headed: { type: 'boolean' }, headless: { type: 'boolean' }, visible: { type: 'boolean' }, new: { type: 'boolean' }, as: { type: 'string' }, lane: { type: 'string' }, wait: { type: 'string' }, timeout: { type: 'string' } });
+    if (!positionals[0]) usage('usage: hallpass open <url> [--headed|--visible|--headless] [--as <credential-name | label | default>] [--new] [--lane <id>]');
     if ([v.headed, v.headless, v.visible].filter(Boolean).length > 1) usage('choose one of --headed, --visible, --headless');
     if (v.new && !v.as) usage('--new needs --as <label>: the name of the account to add');
-    exitFor(await openSite(positionals[0], { mode: v.headed ? 'headed' : v.visible ? 'visible' : v.headless ? 'headless' : 'auto', as: v.as, create: !!v.new, wait: v.wait && Number(v.wait), timeout: v.timeout && Number(v.timeout) }).catch((e) => ({ status: 'failed', reason: 'error', detail: e.message })));
+    exitFor(await openSite(positionals[0], { mode: v.headed ? 'headed' : v.visible ? 'visible' : v.headless ? 'headless' : 'auto', as: v.as, create: !!v.new, lane: v.lane, wait: v.wait && Number(v.wait), timeout: v.timeout && Number(v.timeout) }).catch((e) => ({ status: 'failed', reason: 'error', detail: e.message })));
     break;
   }
   case 'resume': {

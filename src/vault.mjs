@@ -20,6 +20,8 @@ const aad = (name, meta) => Buffer.from(JSON.stringify({ name, meta }));
 export function put(name, meta, secrets) {
   // "site-<host>" is the key of the saved-session profile for credential-less sites; a credential with that name would collide with it
   if (typeof name === 'string' && name.startsWith('site-')) throw new Error('names starting with "site-" are reserved');
+  // "<name>_l_<id>" is the key of a parallel browser lane (see accounts.mjs); a credential with such a name would be taken for one
+  if (typeof name === 'string' && /_l_[a-z0-9][a-z0-9-]{0,15}$/.test(name)) throw new Error('names ending in "_l_<id>" are reserved for parallel browser lanes');
   // "default" is how --as names a site's unlabelled saved login
   if (name === 'default' && !fs.existsSync(file(name))) throw new Error('the name "default" is reserved'); // one that already has the name (made before accounts existed) stays usable and replaceable
   // If the master key is gone (new Windows profile, wiped keychain) but entries exist, minting a fresh key would

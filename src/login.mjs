@@ -17,7 +17,8 @@ import { refreshIfStale, noticeOnce } from './update.mjs';
 import { ensureReady } from './setup.mjs';
 import { notify } from './ui.mjs';
 import { resolveSecrets, resolveRef, looksLikeCode, SecretUnavailable } from './refs.mjs';
-import { siteKey, parseSiteKey, resolveAccount, accountsFor, validLabel, DEFAULT_ACCOUNT } from './accounts.mjs';
+import { siteKey, parseSiteKey, resolveAccount, accountsFor, validLabel, DEFAULT_ACCOUNT, splitLane, laneKey, validLane } from './accounts.mjs';
+import { seedLane } from './lane.mjs';
 
 // Everything that flows back to the model and originates from the page is untrusted text: cap it, strip control chars.
 const safeUrl = (u) => rawSafeUrl(u).slice(0, 200);
@@ -34,7 +35,23 @@ const toDomain = (a) => (a.startsWith('https://*.') ? '*.' + a.slice('https://*.
 // A site can have several saved logins (one per account): siteKey(url, label). See accounts.mjs.
 export { siteKey };
 
+// The key a run lives under (session, profile folder, state file, lock): the login's own name, or name_l_<lane> for a parallel lane.
+// A lane key given back to us (hallpass resume/status/logout <key>) is split into its login and lane first.
+function normLane(name, o) {
+  const sp = !o.lane && splitLane(name);
+  return sp && !vault.exists(name) ? [sp.base, { ...o, lane: sp.lane }] : [name, o];
+}
+const keyOf = (name, o) => { [name, o] = normLane(name, o); return o.lane ? laneKey(name, o.lane) : name; };
+
 function makeCtx(name, o) {
+  [name, o] = normLane(name, o);
+  const ctx = makeCtx0(name, o);
+  // A lane starts as a copy of the login it is a lane of, so it is signed in from the first command
+  if (ctx.lane) ctx.seed = seedLane(ctx.name, ctx.key);
+  return ctx;
+}
+
+function makeCtx0(name, o) {
   if (!vault.exists(name)) return makeGeneric(name, o);
   // Secrets are NOT loaded here. They are decrypted (and any password manager asked) only when a credential must
   // actually be typed, after policy/approval: see ctx.authorize().
@@ -67,14 +84,14 @@ function authorizer(ctx, o) {
 // No vault entry: nothing to decrypt, nothing will ever be typed.
 function makeGeneric(key, o) {
   let url = o.url;
-  if (!url) { try { url = JSON.parse(fs.readFileSync(path.join(stateDir(), key + '.json'), 'utf8')).url; } catch { /* none */ } }
+  if (!url) { try { url = JSON.parse(fs.readFileSync(path.join(stateDir(), (o.lane ? laneKey(key, o.lane) : key) + '.json'), 'utf8')).url; } catch { /* none */ } }
   if (!url) throw new Error(`no credential or open site named "${key}" (try: hallpass open <url>)`);
   const meta = { url, allowed: [new URL(url).origin], selectors: {}, successUrl: null, successText: null };
   return buildCtx(key, meta, null, new Redactor(), o, true);
 }
 
-const writeState = (ctx, phase, extra = {}) =>
-  fs.writeFileSync(path.join(stateDir(), ctx.name + '.json'), JSON.stringify({ phase, url: rawSafeUrl(ctx.openUrl || ctx.meta.url), human: !!ctx.humanMode, at: new Date().toISOString(), ...(ctx.authorizedAt ? { authorizedAt: ctx.authorizedAt } : {}), ...extra }));
+const writeState = (ctx, phase, extra = {}, key = ctx.key) =>
+  fs.writeFileSync(path.join(stateDir(), key + '.json'), JSON.stringify({ phase, url: rawSafeUrl(ctx.openUrl || ctx.meta.url), human: !!ctx.humanMode, at: new Date().toISOString(), ...(ctx.authorizedAt ? { authorizedAt: ctx.authorizedAt } : {}), ...extra }));
 
 function buildCtx(name, meta, secrets, redactor, o, generic = false) {
   const ctx = {
@@ -82,8 +99,10 @@ function buildCtx(name, meta, secrets, redactor, o, generic = false) {
     allowed: meta.allowed,
     authorize: async () => null, // credential-less contexts never need secrets
     nonce: crypto.randomBytes(8).toString('hex'),
-    session: sessionName(name),
-    profile: path.join(profilesDir(), name),
+    lane: o.lane || null,
+    key: o.lane ? laneKey(name, o.lane) : name, // session, profile folder and state file are named by this; name stays the login's own
+    session: sessionName(o.lane ? laneKey(name, o.lane) : name),
+    profile: path.join(profilesDir(), o.lane ? laneKey(name, o.lane) : name),
     trace: [],
   };
   ctx.reset = () => { ctx.st = { fills: { user: 0, pass: 0, otp: 0 }, filledAny: false, stable: 0, idle: 0, capSeen: 0, wallSeen: 0, nullProbes: 0, blank: 0, badFills: 0, lastFill: null }; };
@@ -98,7 +117,11 @@ function buildCtx(name, meta, secrets, redactor, o, generic = false) {
 const note = (ctx, msg) => { ctx.trace.push(`${new Date().toISOString().slice(11, 19)} ${ctx.redactor.scrub(msg)}`); };
 // account = what to pass as --as / "as" to come back to the same login (credential name, label, or "default")
 const accountOf = (ctx) => (ctx.generic ? parseSiteKey(ctx.name)?.label || DEFAULT_ACCOUNT : ctx.name);
-const base = (ctx) => ({ name: ctx.name, session: ctx.session, account: accountOf(ctx), mode: ctx.browser?.headed ? 'headed' : 'headless' });
+const laneInfo = (ctx) => (ctx.lane ? {
+  lane: ctx.lane, lane_key: ctx.key, lane_seeded: !!ctx.seed?.seeded,
+  ...(ctx.seed?.created && !ctx.seed.seeded ? { lane_note: 'This lane could not copy the saved login (it was not signed in yet, or its browser is still open and holds the cookie file), so it started signed out. A stored credential signs in by itself; otherwise sign in once in the main login, close it (hallpass logout <name>), then open the lane again.' } : {}),
+} : {});
+const base = (ctx) => ({ name: ctx.name, session: ctx.session, account: accountOf(ctx), mode: ctx.browser?.headed ? 'headed' : 'headless', ...laneInfo(ctx) });
 
 // via: vault = hallpass typed the credentials; human = the user logged in; session = an existing saved session / no login needed
 const ok = (ctx, p) => ({
@@ -108,7 +131,8 @@ const ok = (ctx, p) => ({
 const LOCKING = new Set(['bad_credentials', 'bad_totp']);
 const readState = (name) => { try { return JSON.parse(fs.readFileSync(path.join(stateDir(), name + '.json'), 'utf8')); } catch { return null; } };
 export const clearState = (name) => { try { fs.rmSync(path.join(stateDir(), name + '.json')); } catch { /* none */ } };
-const fail = (ctx, reason, detail) => (LOCKING.has(reason) && writeState(ctx, 'failed', { reason }), { status: 'failed', ...base(ctx), reason, detail: ctx.redactor.scrub(detail), trace: ctx.trace.slice(-8) });
+const fail = (ctx, reason, detail) => (LOCKING.has(reason) && (writeState(ctx, 'failed', { reason }), ctx.lane && writeState(ctx, 'failed', { reason }, ctx.name)), { // a rejected password in a lane locks the login for every lane
+  status: 'failed', ...base(ctx), reason, detail: ctx.redactor.scrub(detail), trace: ctx.trace.slice(-8) });
 const needsHuman = (ctx, reason) => {
   const hints = {
     captcha: 'A CAPTCHA / bot check is showing.',
@@ -123,8 +147,8 @@ const needsHuman = (ctx, reason) => {
   const where = ctx.browser?.headed ? 'A Chrome window is open on it.' : 'No window is open (headless): re-run hallpass open without --headless (or with --headed) so the user gets a visible window to sign in.';
   return {
     status: 'needs_human', reason, ...base(ctx), url: safeUrl(ctx.last?.url || ''),
-    message: `${hints[reason] || reason} ${where} Ask the user to complete it in that window, then run: hallpass resume ${ctx.name}`,
-    resume: `hallpass resume ${ctx.name}`,
+    message: `${hints[reason] || reason} ${where} Ask the user to complete it in that window, then run: hallpass resume ${ctx.key}`,
+    resume: `hallpass resume ${ctx.key}`,
     trace: ctx.trace.slice(-6),
   };
 };
@@ -324,9 +348,12 @@ function openFailed(ctx, opened) {
 
 // ---------- public API ----------
 async function loginImpl(name, o = {}) {
+  [name, o] = normLane(name, o); // a lane key handed back to us means: that login, in that lane
   const notReady = ensureReady(); // agent-browser + Chrome are installed on first use
   if (notReady) return { name, ...notReady };
-  const release = lock(name);
+  if (o.lane && !validLane(o.lane)) return { status: 'failed', name, reason: 'bad_lane', detail: 'lane must be lowercase letters, digits and - (max 16)' };
+  let release;
+  try { release = lock(keyOf(name, o)); } catch (e) { if (/^lane name too long/.test(e.message)) return { status: 'failed', name, reason: 'bad_lane', detail: e.message }; throw e; }
   let ctx;
   try {
     // A rejected password is never retried automatically, not even by a later command: repeated bad attempts
@@ -397,12 +424,14 @@ async function openSiteImpl(url, o = {}) {
   const picked = resolveAccount(url, o.as, { create: !!o.create });
   if (picked.error) return picked.error;
   const entry = picked.entry || null;
-  if (entry && mode !== 'headed') return loginImpl(entry, { target: url, headed: mode === 'headless' ? false : mode === 'visible' ? true : undefined, timeout: o.timeout, wait: o.wait });
+  if (o.lane && !validLane(o.lane)) return { status: 'failed', reason: 'bad_lane', detail: 'lane must be lowercase letters, digits and - (max 16)' };
+  if (entry && mode !== 'headed') return loginImpl(entry, { target: url, headed: mode === 'headless' ? false : mode === 'visible' ? true : undefined, timeout: o.timeout, wait: o.wait, lane: o.lane });
 
   const key = entry || picked.key;
-  const release = lock(key);
+  let release;
+  try { release = lock(o.lane ? laneKey(key, o.lane) : key); } catch (e) { if (/^lane name too long/.test(e.message)) return { status: 'failed', reason: 'bad_lane', detail: e.message }; throw e; }
   try {
-    const ctx = makeCtx(key, { url });
+    const ctx = makeCtx(key, { url, lane: o.lane });
     ctx.humanMode = true;
     ctx.openUrl = url;
     const deadline = () => Date.now() + (o.timeout ?? 60) * 1000;
@@ -443,11 +472,11 @@ async function openSiteImpl(url, o = {}) {
 }
 
 async function resumeImpl(name, o = {}) {
-  const release = lock(name);
+  const release = lock(keyOf(name, o));
   let ctx;
   try {
     let prev = {};
-    try { prev = JSON.parse(fs.readFileSync(path.join(stateDir(), name + '.json'), 'utf8')); } catch { /* none */ }
+    try { prev = JSON.parse(fs.readFileSync(path.join(stateDir(), keyOf(name, o) + '.json'), 'utf8')); } catch { /* none */ }
     ctx = makeCtx(name, {});
     ctx.humanMode = !!prev.human || ctx.generic;
     ctx.walled = prev.phase === 'needs_human'; // the person was asked to act, so a success now is "via human"
@@ -501,7 +530,7 @@ export function nameLogin(url, label) {
 }
 
 export function status(name) {
-  const meta = vault.exists(name) ? vault.meta(name) : { allowed: null };
+  const meta = vault.exists(splitLane(name)?.base ?? name) ? vault.meta(splitLane(name)?.base ?? name) : vault.exists(name) ? vault.meta(name) : { allowed: null };
   const redactor = new Redactor();
   const b = new Browser({ session: sessionName(name), profile: path.join(profilesDir(), name), redactor });
   const alive = b.alive();
@@ -514,8 +543,11 @@ export function status(name) {
 
 export function logout(name, { wipe = false } = {}) {
   if (!vault.validName(name)) throw new Error('invalid name');
+  const lane = !!splitLane(name);
   const b = new Browser({ session: sessionName(name), profile: path.join(profilesDir(), name), redactor: new Redactor() });
   b.close();
-  if (wipe) fs.rmSync(path.join(profilesDir(), name), { recursive: true, force: true });
-  return { name, closed: true, profile_wiped: wipe };
+  // A lane is a throwaway copy: closing it removes it, so lanes never pile up. The login it was copied from is untouched.
+  if (wipe || lane) fs.rmSync(path.join(profilesDir(), name), { recursive: true, force: true });
+  if (lane) clearState(name);
+  return { name, closed: true, profile_wiped: wipe || lane, ...(lane ? { lane: splitLane(name).lane } : {}) };
 }

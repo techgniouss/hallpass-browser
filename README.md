@@ -160,6 +160,10 @@ Play Console with two Google logins, GitHub personal and work, two Supabase orga
 
 If a site has more than one login and the agent does not say which, `open` stops with `reason: "ambiguous_account"` and the list of choices, and the agent must **ask you**. In an MCP client that supports *elicitation* (a native picker), Hallpass shows you the choice directly. Any other agent (Claude Code, Codex, Gemini CLI, Cursor, ...) is told by its instructions to ask you in chat and then repeat the call with `--as <your choice>`. The same flow works from a plain shell.
 
+### Parallel work on one account (lanes)
+
+One login is one browser. To run two tasks on the same account at once (for example publishing two apps), give each its own lane: `hallpass open <url> --lane app2` (MCP: `lane`). A lane is a separate browser with its own copy of the login, so it starts signed in and the two do not fight over one Chrome profile. The credential, its approvals and its limits are shared; a password rejected in any lane locks the login for all. Use the returned `session` for every later command, and finish with `hallpass logout <lane_key>`: closing a lane deletes its copy and leaves the login alone. If the login's own browser is still open on Windows, Chrome may hold its cookie file and the lane starts signed out (the result says `lane_seeded: false`); a stored credential signs in by itself, otherwise close the main browser first (`hallpass logout <name>`) and open the lane again. Two lanes acting on the same app at the same time still conflict; different apps are fine.
+
 **Upgrading from an earlier release:** stored credentials, saved sessions and the audit log are read as they are; there is no conversion step. After upgrading, run `hallpass doctor`: it tells you if the instruction files an earlier `hallpass install` wrote (Codex, Gemini, the Claude skill) need `hallpass install --for <tool>` again, so your agent knows how to ask which account. Plugin installs update on their own.
 
 ### How much it asks you (access levels)

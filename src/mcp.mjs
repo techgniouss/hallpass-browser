@@ -22,7 +22,7 @@ import { fetchPage } from './fetch.mjs';
 export { guardBrowser };
 import { profilesDir } from './paths.mjs';
 
-const VERSION = '1.7.0';
+const VERSION = '1.8.0';
 
 export const INSTRUCTIONS = `hallpass opens websites in a browser you can drive, and handles login safely.
 
@@ -64,6 +64,7 @@ const TOOLS = [
         mode: { type: 'string', enum: ['auto', 'headed', 'visible', 'headless'], description: 'auto (default); visible = show a Chrome window the user can watch, a stored credential is still typed for them; headed = visible window and the USER signs in themselves; headless = never open a window. Use visible/headed when the user asks to see the browser.' },
         new: { type: 'boolean', description: 'with "as": the user wants to ADD a new account with that label (they sign in in the window). Without it an unknown label is an error, so a typo never creates an account.' },
         as: { type: 'string', description: 'which account on this site: the name of a stored credential, a short label for a saved browser login (a new label starts a new account), or "default" for the site\'s unlabelled login. Required when the site has several accounts (see hallpass_accounts). Ask the user; do not guess.' },
+        lane: { type: 'string', description: 'a short id (lowercase letters, digits, -; max 16) for a PARALLEL browser on the same login: its own session and profile, copied from the login so it starts signed in. Use a different lane per task when two tasks must run on the same account at the same time (publishing two apps). Use the returned "session" for every later call. Finish with hallpass_logout using the returned lane_key. Same credential, same approvals; omit for the normal single session.' },
         timeout: { type: 'number', description: 'seconds to wait for the page/login to settle (default 30)' },
       },
     },
@@ -92,7 +93,7 @@ const TOOLS = [
   },
   {
     name: 'hallpass_logout',
-    description: 'Close the browser session. With wipe=true also delete its saved profile (forgets the login).',
+    description: 'Close the browser session. With wipe=true also delete its saved profile (forgets the login). A parallel lane (pass its lane_key as name) is always removed when closed; the login it was copied from is untouched.',
     inputSchema: { type: 'object', required: ['name'], additionalProperties: false, properties: { name: { type: 'string' }, wipe: { type: 'boolean' } } },
   },
   {
@@ -185,7 +186,7 @@ async function pickAccount(r) {
 export async function callTool(name, a = {}) {
   switch (name) {
     case 'hallpass_open': {
-      const o = { mode: a.mode || 'auto', timeout: a.timeout ?? 30 }; // per pass; most MCP clients time out tool calls near 60s
+      const o = { mode: a.mode || 'auto', timeout: a.timeout ?? 30, ...(a.lane ? { lane: a.lane } : {}) }; // per pass; most MCP clients time out tool calls near 60s
       let r = await openSite(a.url, { ...o, as: a.as, create: a.new === true });
       if (r.reason === 'ambiguous_account' && !a.as) {
         const pick = await pickAccount(r);
